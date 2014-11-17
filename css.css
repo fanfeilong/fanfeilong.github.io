@@ -1,0 +1,54 @@
+body {
+  color: #333333;
+  font-family: Georgia, serif;
+  max-width: 800px;
+  margin: 0 auto;
+  line-height: 1.4em;
+  padding: 0 10px;
+}
+
+h1, h2 {
+  border-bottom: 1px #ccc solid;
+  padding-bottom: .2em;
+  margin-bottom: .5em;
+}
+
+ul#contact {
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.section {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+ul.section ul {
+  margin-bottom: 1em;
+  padding-left: 1.75em;
+  list-style-type: square;
+}
+
+span.job-title {
+  font-style: italic;
+}
+
+span.date {
+  float: right;
+}
+
+a {
+  color: #333333;
+  text-decoration: none;
+}
+
+body:hover a {
+  color: #08C;
+  border-bottom: thin #08c dotted;
+}
+
+body:hover a:hover {
+  color: #005580;
+  border-bottom: thin #005580 dotted;
+}
