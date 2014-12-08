@@ -39,7 +39,7 @@ span.date {
 }
 
 a {
-  color: #333333;
+  color: #005580;
   text-decoration: none;
 }
 
@@ -51,4 +51,8 @@ body:hover a {
 body:hover a:hover {
   color: #005580;
   border-bottom: thin #005580 dotted;
+}
+
+.item {
+  text-indent: 20px;
 }
