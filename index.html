@@ -1,158 +1,105 @@
 ﻿<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
 <html>
 <head>
-	<link rel="stylesheet" type="text/css" href="css.css">
+	<link rel="stylesheet" type="text/css" href="css/resume.css">
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 </head>
 
 <body>
-    <div>
-        <div id="about">
-            <h2>Fanfeilong的主页</h2>
-            <ul>
-                <li> 主页: 
-                <a href="http://fanfeilong.github.io/" 
-                   target="_blank">
-                   fanfeilong.github.io
-                </a> 
-                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-                笔记: 
-                <a href="https://gist.github.com/fanfeilong" 
-                   target="_blank">
-                   gist.github.com/fanfeilong
-                </a> 
-                </li>
-				<li>
-                代码: 
-                <a href="https://github.com/fanfeilong" 
-                   target="_blank">
-                   github.com/fanfeilong
-                </a> 
-                &nbsp;&nbsp;
-                知乎: 
-                <a href="http://www.zhihu.com/people/huan-hui-long" 
-                   target="_blank">
-                   幻灰龙
-                </a> 
-                </li>
-            </ul>
-        </div>
-        <div id="main">
-            <div class="section">
-            <h2>Notes</h2>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/9974805"
-                       target="_blank">书目</a>，记录读书进度
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/10267878"
-                       target="_blank">操作为王</a>，根据2/8原则，记录各种工具的最常用又容易忘记的操作
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/addde50641c4ab32936d"
-                       target="_blank">数学</a>，做一个超级压缩饼干帖子。
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/975e9aee6e7c081e1027"
-                       target="_blank">物理</a>，粒子的世界
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/ac6a11b451a06a802e5f"
-					   target="_blank">化学</a>，组合、连接、替换
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/bde17ede6b88a335c124"
-                       target="_blank">生物</a>，生物和计算机一样有趣
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/0e10cf72cef4cfa4f24d"
-					   target="_blank">心理学</a>，心智模型
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/12c5780e0d3811f5d86d"
-                       target="_blank">地理</a>，我在哪里
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/bc8947a46cc27d982ed0"
-                       target="_blank">历史</a>，不同空间，不同时间，不同维度。
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/91cf89ddea74a8416a3d"
-                       target="_blank">哲学</a>，形而上学
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/65ec6a924af8d1f07c4b"
-                       target="_blank">音乐</a>，分析与欣赏
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/4052fc0d6ad4848e2ded"
-                       target="_blank">概念区分</a>，那些常见的谬误。
-                </div>
-				<div class="item">
-					<a href="https://gist.github.com/fanfeilong/5c8aaf7181bd2862d0f8"
-						target="_blank">Distributed Computing</a>，Distributed Computing is P2P
-				</div>
+	<div id="about">
+		<h2>Fanfeilong的主页</h2>
+		<ul>
+			<li> 主页: 
+				 <a href="http://fanfeilong.github.io/" 
+					target="_blank">
+					fanfeilong.github.io
+				 </a> 
+				 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+				 笔记: 
+				 <a href="https://gist.github.com/fanfeilong" 
+					target="_blank">
+					gist.github.com/fanfeilong
+				 </a> 
+			</li>
+			<li>
+				 代码: 
+				 <a href="https://github.com/fanfeilong" 
+					target="_blank">
+					github.com/fanfeilong
+				 </a> 
+				 &nbsp;&nbsp;
+				 知乎: 
+				 <a href="http://www.zhihu.com/people/huan-hui-long" 
+					target="_blank">
+					幻灰龙
+				 </a> 
+			 </li>
+		</ul>
+	</div>
+	<div id="main">
+		<div class="section" id="notes">
+		<h2>Notes</h2>
+		<script type="text/javascript">
+			var notes = {
+				"书目":["https://gist.github.com/fanfeilong/9974805","记录读书进度"],
+				"操作为王":["https://gist.github.com/fanfeilong/10267878","根据2/8原则，记录各种工具的最常用又容易忘记的操作"],
+				"数学":["https://gist.github.com/fanfeilong/addde50641c4ab32936d","做一个超级压缩饼干帖子"],
+				"物理":["https://gist.github.com/fanfeilong/975e9aee6e7c081e1027","粒子的世界"],
+				"化学":["https://gist.github.com/fanfeilong/ac6a11b451a06a802e5f","组合、连接、替换"],
+				"生物":["https://gist.github.com/fanfeilong/bde17ede6b88a335c124","生物和计算机一样有趣"],
+				"心理学":["https://gist.github.com/fanfeilong/0e10cf72cef4cfa4f24d","心智模型"],
+				"地理":["https://gist.github.com/fanfeilong/12c5780e0d3811f5d86d","我在哪里"],
+				"历史":["https://gist.github.com/fanfeilong/bc8947a46cc27d982ed0","不同空间，不同时间，不同维度"],
+				"哲学":["https://gist.github.com/fanfeilong/91cf89ddea74a8416a3d","形而上学"],
+				"音乐":["https://gist.github.com/fanfeilong/65ec6a924af8d1f07c4b","分析与欣赏"],
+				"概念":["https://gist.github.com/fanfeilong/4052fc0d6ad4848e2ded","那些常见的谬误"],
+				"Distributed Computing":["https://gist.github.com/fanfeilong/5c8aaf7181bd2862d0f8","Distributed Computing is P2P"],
+				"Linux Shell":["https://gist.github.com/fanfeilong/c7284d48d96af8c1fcb2","+20%技能点"],
+				"Android Dev":["https://gist.github.com/fanfeilong/2b94a702a5f4978cbf24","工具链/NDK/JNI/JAVA"],
+				"Lua":["https://gist.github.com/fanfeilong/301ea60123a0a04d02b1","简洁优雅到极致的C代码"],
+				"加密":["https://gist.github.com/fanfeilong/6bad3e5c9acaa47f3e87","原理总是要大致懂的"],
+				"工程":["https://gist.github.com/fanfeilong/bde417193886b14eb668","工程和科学是有区别的，不过他们都需要好习惯"],
+				"PL":["https://gist.github.com/fanfeilong/9974180","具体编程语言的笔记"],
+				"Compiler":["https://gist.github.com/fanfeilong/9968862","编程语言、编译器、解释器、虚拟机等底层笔记"],
+				"Algorithum":["https://gist.github.com/fanfeilong/49682ae4fb562480b445","程序即数据，程序=算法+数据结构"],
+				"Encode":["https://gist.github.com/fanfeilong/844ad0c2e2654cfd4c7e","从字符编码开始，编码是信息论的重要概念"],
+				"Network":["https://gist.github.com/fanfeilong/73dd0556c724c7a1a202","Network机理，网络协议，一览无余"],
+				"Read":["https://gist.github.com/fanfeilong/fe789ce45b6937a43eb7","经典文摘"]
+			};
+			var notesNode = document.getElementById('notes');
+			for(var noteName in notes){
+				var note = notes[noteName];
+				var noteLink = note[0];
+				var noteInfo = note[1];
 
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/c7284d48d96af8c1fcb2"
-						target="_blank">Linux Shell</a>，+20%技能点
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/2b94a702a5f4978cbf24"
-						target="_blank">Android Dev</a>，工具链/NDK/JNI/JAVA
-                </div>
-				<div class="item">
-                    <a href="https://gist.github.com/fanfeilong/301ea60123a0a04d02b1"
-                       target="_blank">Lua源码分析</a>，简洁优雅到极致的C代码
-                </div>
-				<div class="item">
-					<a href="https://gist.github.com/fanfeilong/6bad3e5c9acaa47f3e87"
-					   target="_blank">加密和安全</a>，原理总是要大致懂的。
-				</div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/bde417193886b14eb668"
-                       target="_blank">好的工程习惯</a>，工程和科学是有区别的，不过他们都需要好习惯
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/9974180"
-                       target="_blank">编程语言</a>，具体编程语言的笔记，压缩饼干
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/9968862"
-                       target="_blank">编译原理</a>，编程语言、编译器、解释器、虚拟机等底层笔记
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/49682ae4fb562480b445"
-                       target="_blank">算法和数据结构</a>，程序即数据，程序=算法+数据结构
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/844ad0c2e2654cfd4c7e"
-                       target="_blank">编码</a>，从字符编码开始，编码是信息论的重要概念
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/73dd0556c724c7a1a202"
-                       target="_blank">网络</a>，Network机理，网络协议，一览无余
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/9966217"
-                       target="_blank">BOLT-索引页面</a>，迅雷BOLT界面引擎索引和碎片笔记
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/9948752"
-                       target="_blank">MSDN-索引页面</a>，MSDN上的条目索引，有些可以赏析
-                </div>
-                <div class="item">
-                    <a href="https://gist.github.com/fanfeilong/fe789ce45b6937a43eb7"
-                       target="_blank">经典文摘</a>，收集以反复读之
-                </div>
-            </div>
-			<div id="foot">
-			<h2>
-			The End
-			</h2>
-			自由、独立、真实
-			</div>
-    </div>
-	
+				// Create Item Node
+				var itemNode = document.createElement("div");
+				itemNode.setAttribute("class", "item");
+				
+				// Create Note Link Node 
+				var linkNode = document.createElement("a");
+				linkNode.setAttribute("href",noteLink);
+				linkNode.setAttribute("target","_blank");
+				
+				// Create Note Name Node 
+				var nameNode = document.createTextNode(noteName);
+				
+				// Create Node Info Node
+				var infoNode = document.createTextNode(": "+noteInfo);
+
+				// Append Item Node
+				linkNode.appendChild(nameNode);
+				itemNode.appendChild(linkNode);
+				itemNode.appendChild(infoNode);
+				notesNode.appendChild(itemNode);
+			}
+		</script>
+		</div>
+		<div id="foot">
+		<h2>The End</h2>
+		自由、独立、真实
+		</div>
+	</div>
 </body>
 
 </html>
