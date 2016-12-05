@@ -7,6 +7,19 @@ body {
   padding: 0 10px;
 }
 
+#about{
+  margin-top:10px;
+}
+
+.left {
+  float: left;
+  padding: 0px 5px 15px 28px;
+  margin: 0px 5px 5px 0;
+}
+.links{
+  clear:both;
+}
+
 h1, h2 {
   border-bottom: 1px #ccc solid;
   padding-bottom: .2em;
