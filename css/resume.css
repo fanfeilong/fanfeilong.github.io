@@ -1,3 +1,6 @@
+/***************************
+ * common
+ ***************************/
 body {
   color: #333333;
   font-family: Georgia, serif;
@@ -7,17 +10,9 @@ body {
   padding: 0 10px;
 }
 
-#about{
-  margin-top:10px;
-}
-
-.left {
-  float: left;
-  padding: 0px 5px 15px 28px;
-  margin: 0px 5px 5px 0;
-}
-.links{
-  clear:both;
+a {
+  color: #005580;
+  text-decoration: none;
 }
 
 h1, h2 {
@@ -26,36 +21,80 @@ h1, h2 {
   margin-bottom: .5em;
 }
 
-ul#contact {
-  list-style-type: none;
-  margin: 0;
-  padding: 0;
+/***************************
+ * menu
+ ***************************/
+#about{
+  margin-top:10px;
 }
 
-ul.section {
-  list-style-type: none;
+#menu-me {
+  float: left;
+  display:block;
+  padding: 0px 0px 5px 40px;
+  margin: 0px 0px 0px 0;
+}
+
+#menu-name{
+  float: left;
+  display:block;
+  padding: 10px 0px 0px 10px;
+}
+
+.menus{
+  clear: both;
+  list-style-type:none;
+  margin:0;
+  padding:0;
+  /*position: absolute;*/
+}
+
+.menu-item{
+  list-style: none;
+  float: left;
+  padding-top: 0;
   padding-left: 0;
+  margin-left: 0;
+  display:inline-block;
+  margin-right: 1px;
 }
 
-ul.section ul {
-  margin-bottom: 1em;
-  padding-left: 1.75em;
-  list-style-type: square;
+.menu-item a{
+  padding-left: 0;
+  margin-left: 0;
+  display:block;
+  min-width:50px;
+  height: 40px;
+  text-align: center;
+  line-height: 40px;
+  color: #fff;
+  background: #2f3036;
 }
 
-span.job-title {
-  font-style: italic;
+@media screen and (max-width: 44em) {
+  nav[role="full-horizontal"] {
+    .link {
+      width: 100%;
+    }
+  }
 }
 
-span.date {
-  float: right;
+/***************************
+ * main
+ ***************************/
+#main{
+  clear:both;
+}
+
+#pr{
+  margin-left: 18px;
 }
 
 a {
   color: #005580;
   text-decoration: none;
 }
-
+ 
 body:hover a {
   color: #08C;
   border-bottom: thin #08c dotted;
@@ -64,8 +103,4 @@ body:hover a {
 body:hover a:hover {
   color: #005580;
   border-bottom: thin #005580 dotted;
-}
-
-.item {
-  text-indent: 20px;
 }
