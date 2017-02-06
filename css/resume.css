@@ -68,14 +68,6 @@ h1, h2 {
   background: #2f3036;
 }
 
-@media screen and (max-width: 44em) {
-  nav[role="full-horizontal"] {
-    .link {
-      width: 100%;
-    }
-  }
-}
-
 /***************************
  * main
  ***************************/
