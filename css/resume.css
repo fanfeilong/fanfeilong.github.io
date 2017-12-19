@@ -83,13 +83,16 @@ a {
   color: #005580;
   text-decoration: none;
 }
- 
+
+/* 
 body:hover a {
   color: #08C;
   border-bottom: thin #08c dotted;
 }
+*/
 
 body:hover a:hover {
   color: #005580;
   border-bottom: thin #005580 dotted;
 }
+
