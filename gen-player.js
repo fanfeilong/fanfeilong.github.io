@@ -18,16 +18,40 @@ const songs = {
 };
 
 songdatas = [];
+htmls = [];
 for(const name in songs){
 	const label = songs[name];
+	const n = path.basename(name,'.mp3');
 	songdatas.push({
-		"name": path.basename(name,'.mp3'),
+		"name": n,
 		"artist": label,
 		"album": "We Are to Answer",
 		"url": `./bin/${name}`,
 		"cover_art_url": "./album-art/we-are-to-answer.jpg"
 	});
+
+	htmls.push(`
+		<div class="song amplitude-song-container amplitude-play-pause" data-amplitude-song-index="0">
+	      <div class="song-now-playing-icon-container">
+	        <div class="play-button-container">
+
+	        </div>
+	        <img class="now-playing" src="./img/now-playing.svg"/>
+	      </div>
+	      <div class="song-meta-data">
+	        <span class="song-title">${n}</span>
+	        <span class="song-artist">${label}</span>
+	      </div>
+	      <a href="https://switchstancerecordings.bandcamp.com/track/risin-high-feat-raashan-ahmad" class="bandcamp-link" target="_blank">
+	        <img class="bandcamp-grey" src="./img/bandcamp-grey.svg"/>
+	        <img class="bandcamp-white" src="./img/bandcamp-white.svg"/>
+	      </a>
+	      <span class="song-duration">3:30</span>
+	    </div>
+	`)
 }
 console.log(songdatas);
+
+console.log(htmls.join('\n\n'));
 
 console.log(Object.keys(songs).length);
