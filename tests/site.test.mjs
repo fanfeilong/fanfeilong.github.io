@@ -29,7 +29,7 @@ before(async () => {
   staticServer = launch(['-m','http.server','18765','--bind','127.0.0.1','--directory','dist']);
   localServer = startLocal();
   await Promise.all([ready(staticBase), ready(localBase)]);
-  browser = await chromium.launch();
+  browser = await chromium.launch({channel:process.env.PLAYWRIGHT_CHANNEL || undefined});
   books = JSON.parse(await readFile('dist/books/book-manager/books.json','utf8')).books;
 });
 after(async () => { await browser?.close(); await Promise.all([stop(staticServer),stop(localServer)]); if (temporary) await rm(temporary,{recursive:true,force:true}); });
@@ -149,10 +149,10 @@ test('PDF loading feedback, mouse/touch gestures, boundaries and long-page panni
     await page.mouse.move(x,y); await page.mouse.down();
     await page.mouse.move(x+dx,y+dy,{steps:8}); await page.mouse.up();
   };
-  await drag(120,0); await atPage(3);
-  await drag(-120,0); await atPage(2);
-  await drag(0,120); await atPage(3);
-  await drag(0,-120); await atPage(2);
+  await drag(-120,0); await atPage(3);
+  await drag(120,0); await atPage(2);
+  await drag(0,-120); await atPage(3);
+  await drag(0,120); await atPage(2);
   await drag(20,0); await atPage(2);
   // Real touch input exercises browser pointer capture and touch-action handling.
   const session = await context.newCDPSession(page);
@@ -161,20 +161,20 @@ test('PDF loading feedback, mouse/touch gestures, boundaries and long-page panni
     for(let i=1;i<=5;i++) await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+dx*i/5,y:y+dy*i/5}]});
     await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
   };
-  await swipe(120,0); await atPage(3);
-  await swipe(-120,0); await atPage(2);
-  await swipe(0,120); await atPage(3);
-  await swipe(0,-120); await atPage(2);
+  await swipe(-120,0); await atPage(3);
+  await swipe(120,0); await atPage(2);
+  await swipe(0,-120); await atPage(3);
+  await swipe(0,120); await atPage(2);
   await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
   await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+120,y}]});
   await session.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
   await atPage(2);
   await page.locator('#prev-page').click(); await atPage(1);
-  await drag(-120,0); await atPage(1);
+  await drag(120,0); await atPage(1);
   await page.locator('#page-input').fill(await page.locator('#page-count').textContent());
   await page.locator('#page-input').press('Enter'); await page.locator('#reader-hint').click();
   const last = Number(await page.locator('#page-count').textContent());
-  await atPage(last); await drag(120,0); await atPage(last);
+  await atPage(last); await drag(-120,0); await atPage(last);
   // A long page pans first; one drag reaching its edge must not turn it.
   await page.setViewportSize({width:1000,height:700});
   await page.waitForTimeout(250); await atPage(last);
@@ -188,6 +188,120 @@ test('PDF loading feedback, mouse/touch gestures, boundaries and long-page panni
   assert.deepEqual(axe.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),[]);
   await page.locator('#reader-close').click();
   assert.deepEqual(errors,[]);
+  await context.close();
+});
+
+// A real, deterministic PDF with wide margins, graphics and three pages.
+function readingFixture() {
+  const stream = '0 G 1 w 100 10 400 780 re S BT /F1 12 Tf 120 700 Td (Readable PDF content) Tj ET';
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [5 0 R 6 0 R 7 0 R] /Count 3 >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    ...Array.from({length:3},()=> '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>'),
+  ];
+  let pdf = '%PDF-1.4\n'; const offsets = [0];
+  for (const [i, object] of objects.entries()) { offsets.push(pdf.length); pdf += `${i+1} 0 obj\n${object}\nendobj\n`; }
+  const start = pdf.length;
+  pdf += `xref\n0 ${objects.length+1}\n0000000000 65535 f \n`;
+  pdf += offsets.slice(1).map(offset=>`${String(offset).padStart(10,'0')} 00000 n \n`).join('');
+  return Buffer.from(pdf + `trailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`);
+}
+async function openReadingFixture(page) {
+  await page.route(/\.pdf(?:\?|$)/i, route=>route.fulfill({contentType:'application/pdf',body:readingFixture()}));
+  await page.goto(staticBase); await page.locator('.book-title').first().waitFor();
+  const sample=books.find(book=>book.extension==='pdf');
+  await page.locator('#search-input').fill(sample.name);
+  await page.locator('.book-title').filter({hasText:sample.name}).first().click();
+  await readerAt(page,1);
+}
+async function readerAt(page,number,suffix='') {
+  await page.waitForFunction(({number,suffix})=>document.querySelector('#reader-status').textContent===`第 ${number} 页${suffix}` && document.querySelector('#reader-scroll').getAttribute('aria-busy')==='false', {number,suffix});
+}
+async function changeReader(page, action) {
+  await action();
+  await page.waitForFunction(()=>document.querySelector('#reader-scroll').getAttribute('aria-busy')==='false');
+}
+
+test('mobile PDF: content fit, reversible cropping, anchored double-tap/pinch zoom and column reading', async () => {
+  const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true});
+  const page=await context.newPage(); const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await openReadingFixture(page);
+  assert.equal(await page.locator('#reader-fit').inputValue(),'content');
+  const contentHeight=await page.locator('#pdf-canvas').evaluate(el=>el.clientHeight);
+  await page.screenshot({path:'artifacts/pdf-mobile-content-fit.png'});
+  await changeReader(page,()=>page.locator('#reader-fit').selectOption('page'));
+  const pageHeight=await page.locator('#pdf-canvas').evaluate(el=>el.clientHeight);
+  assert.ok(contentHeight > pageHeight*1.3, 'content fit makes content larger while retaining edge graphics');
+  await page.locator('#reader-trim').evaluate(el=>{el.value='10';el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));});
+  await readerAt(page,1);
+  assert.equal(await page.locator('#reader-trim-value').textContent(),'10%');
+  assert.ok(await page.locator('#pdf-canvas').evaluate(el=>el.clientHeight)>pageHeight*1.2);
+  await changeReader(page,()=>page.locator('#reader-reset').click());
+  assert.equal(await page.locator('#pdf-canvas').evaluate(el=>el.clientHeight),pageHeight);
+  const session=await context.newCDPSession(page);
+  const rect=await page.locator('#pdf-canvas').boundingBox();
+  const x=rect.x+rect.width*.6, y=rect.y+rect.height*.35;
+  const tap=async()=>{await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});};
+  await tap(); await tap();
+  await page.waitForFunction(()=>document.querySelector('#zoom-label').textContent==='200%');await readerAt(page,1);
+  const zoomed=await page.locator('#pdf-canvas').boundingBox();
+  assert.ok(Math.abs((x-zoomed.x)/zoomed.width-.6)<.035, 'double-tap keeps the tapped horizontal content position');
+  assert.ok(Math.abs((y-zoomed.y)/zoomed.height-.35)<.035, 'double-tap keeps the tapped vertical content position');
+  await changeReader(page,()=>page.locator('#reader-reset').click());
+  const pinchY=rect.y+180;
+  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:145,y:pinchY},{x:245,y:pinchY}]});
+  for(let i=1;i<=5;i++) await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:145-i*8,y:pinchY},{x:245+i*8,y:pinchY}]});
+  await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await page.waitForFunction(()=>document.querySelector('#zoom-label').textContent==='180%');await readerAt(page,1);
+  assert.equal(await page.locator('#page-input').inputValue(),'1');
+  await changeReader(page,()=>page.locator('#reader-reset').click());
+  await page.locator('#reader-columns').selectOption('2');await readerAt(page,1,' · 左栏');
+  assert.equal(await page.locator('#prev-page').isDisabled(),true);
+  await page.locator('#next-page').click();await readerAt(page,1,' · 右栏');
+  await page.locator('#next-page').click();await readerAt(page,2,' · 左栏');
+  await page.locator('#prev-page').click();await readerAt(page,1,' · 右栏');
+  await page.locator('#reader-reset').click();await readerAt(page,1);
+  await page.screenshot({path:'artifacts/pdf-mobile-reading-controls.png'});
+  assert.equal(await page.evaluate(()=>document.querySelector('#reader').scrollWidth<=innerWidth),true);
+  const axe=await new AxeBuilder({page}).analyze();assert.deepEqual(axe.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)})),[]);
+  for (const viewport of [{width:320,height:844},{width:844,height:390}]) {
+    await page.setViewportSize(viewport);await page.waitForTimeout(260);await readerAt(page,1);
+    assert.equal(await page.evaluate(()=>document.querySelector('#reader').scrollWidth<=innerWidth),true);
+    assert.ok((await page.locator('#reader-scroll').boundingBox()).height>=150);
+    await page.screenshot({path:`artifacts/pdf-reading-${viewport.width}.png`});
+  }
+  assert.deepEqual(errors,[]);await context.close();
+});
+
+test('trackpad: horizontal/vertical wheel navigation, inertia latch, scroll priority and ctrl-wheel zoom', async () => {
+  const context=await browser.newContext({viewport:{width:1000,height:1800}});
+  const page=await context.newPage();await openReadingFixture(page);
+  const surface=page.locator('#reader-scroll');await surface.hover();
+  await page.mouse.wheel(120,0);await readerAt(page,2);
+  // Momentum in the same gesture cannot advance another page.
+  await page.mouse.wheel(180,0);await page.waitForTimeout(100);await readerAt(page,2);
+  await page.waitForTimeout(270);await page.mouse.wheel(-120,0);await readerAt(page,1);
+  await page.waitForTimeout(270);await page.mouse.wheel(0,120);await readerAt(page,2);
+  await page.waitForTimeout(270);await page.mouse.wheel(0,-120);await readerAt(page,1);
+  await page.waitForTimeout(270);
+  // Small deltas accumulate rather than requiring a single large wheel event.
+  for(let i=0;i<6;i++)await page.mouse.wheel(20,0);
+  await readerAt(page,2);
+  await page.waitForTimeout(270);
+  await page.keyboard.down('Control');await page.mouse.wheel(0,-100);await page.keyboard.up('Control');
+  await page.waitForFunction(()=>parseInt(document.querySelector('#zoom-label').textContent)>150);await readerAt(page,2);
+  assert.ok(await page.locator('#pdf-canvas').evaluate(el=>el.width*el.height)<=10_000_000);
+  await page.setViewportSize({width:1000,height:700});await page.waitForTimeout(260);await readerAt(page,2);
+  await surface.evaluate(el=>el.scrollTop=100);
+  const before=await surface.evaluate(el=>el.scrollTop);
+  await surface.hover();await page.mouse.wheel(0,180);await page.waitForTimeout(100);
+  assert.ok(await surface.evaluate(el=>el.scrollTop)>before);await readerAt(page,2);
+  // Reaching an edge in this burst only scrolls; a new gesture then flips.
+  await surface.evaluate(el=>el.scrollTop=el.scrollHeight);
+  await page.mouse.wheel(0,120);await readerAt(page,2);
+  await page.waitForTimeout(270);await page.mouse.wheel(0,120);await readerAt(page,3);
   await context.close();
 });
 

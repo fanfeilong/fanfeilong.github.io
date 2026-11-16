@@ -13,6 +13,7 @@ const state = {
   books: [], view: 'all', category: '', topic: '', type: '', query: '', sort: 'name', layout: 'grid',
   favorites: readStore('book-library-favorites', []), recent: readStore('book-library-recent', {}),
   reader: null, pdf: null, loadingTask: null, renderTask: null, page: 1, zoom: 1, generation: 0, renderSerial: 0, busy: false,
+  fit: 'page', trim: 0, columns: 1, column: 0, cropCache: new Map(),
 };
 
 function readStore(key, fallback) {
@@ -182,7 +183,12 @@ async function openBook(book) {
   $('#page-input').value = 1; $('#page-count').textContent = '–';
   for (const id of ['prev-page', 'next-page', 'page-input', 'zoom-in', 'zoom-out']) $(`#${id}`).disabled = true;
   $('#reader-scroll').scrollTo(0, 0);
-  state.zoom = 1;
+  state.zoom = 1; state.fit = innerWidth <= 800 ? 'content' : 'page';
+  state.trim = 0; state.columns = 1; state.column = 0; state.cropCache.clear();
+  $('#reader-fit').value = state.fit; $('#reader-trim').value = 0;
+  $('#reader-trim-value').textContent = '0%'; $('#reader-columns').value = '1';
+  $('#zoom-label').textContent = '适合宽度';
+  for (const control of document.querySelectorAll('.reader-options input, .reader-options select, .reader-options button')) control.disabled = true;
   try {
     await paintFeedback();
     if (generation !== state.generation) return;
@@ -207,6 +213,7 @@ async function openBook(book) {
     $('#page-count').textContent = pdf.numPages;
     $('#page-input').max = pdf.numPages;
     for (const id of ['page-input', 'zoom-in', 'zoom-out']) $(`#${id}`).disabled = false;
+    for (const control of document.querySelectorAll('.reader-options input, .reader-options select, .reader-options button')) control.disabled = false;
     remember(book, state.page);
     await renderPage();
   } catch (error) {
@@ -216,44 +223,109 @@ async function openBook(book) {
   }
 }
 
-async function renderPage() {
+function zoomAnchor(clientX, clientY) {
+  const rect = $('#pdf-canvas').getBoundingClientRect();
+  return {x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
+    y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)), clientX, clientY};
+}
+function centerAnchor() {
+  const rect = $('#reader-scroll').getBoundingClientRect();
+  return zoomAnchor(rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+function setZoom(zoom, anchor = centerAnchor()) {
+  if (!state.pdf) return;
+  state.zoom = Math.max(.5, Math.min(5, zoom));
+  renderPage(anchor);
+}
+
+// Analyze a small raster, including images and diagrams (not only PDF text).
+// Keep a safety margin and cap automatic cuts; the original stays one click away.
+async function contentBounds(page, valid) {
+  if (state.cropCache.has(page.pageNumber)) return state.cropCache.get(page.pageNumber);
+  const base = page.getViewport({scale: 1});
+  const viewport = page.getViewport({scale: Math.min(1, 480 / base.width, 720 / base.height)});
+  const preview = document.createElement('canvas');
+  preview.width = Math.ceil(viewport.width); preview.height = Math.ceil(viewport.height);
+  const task = page.render({canvas: preview, canvasContext: preview.getContext('2d'), viewport});
+  state.renderTask = task;
+  await task.promise;
+  if (!valid()) return null;
+  const {width, height} = preview;
+  const pixels = preview.getContext('2d').getImageData(0, 0, width, height).data;
+  let left = width, right = -1, top = height, bottom = -1;
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const i = (y * width + x) * 4;
+    if (pixels[i + 3] > 32 && Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) < 235) {
+      left = Math.min(left, x); right = Math.max(right, x);
+      top = Math.min(top, y); bottom = Math.max(bottom, y);
+    }
+  }
+  const result = right < left ? {left:0, top:0, right:1, bottom:1} : {
+    left: Math.min(.15, Math.max(0, (left - 6) / width)),
+    right: Math.max(.85, Math.min(1, (right + 7) / width)),
+    top: Math.min(.1, Math.max(0, (top - 6) / height)),
+    bottom: Math.max(.9, Math.min(1, (bottom + 7) / height)),
+  };
+  state.cropCache.set(page.pageNumber, result);
+  return result;
+}
+
+async function renderPage(anchor = null) {
   if (!state.pdf || !state.reader) return;
   const generation = state.generation;
   const serial = ++state.renderSerial;
   const pageNumber = state.page;
   if (state.renderTask) { state.renderTask.cancel(); state.renderTask = null; }
   $('#page-input').value = pageNumber;
-  $('#prev-page').disabled = pageNumber <= 1;
-  $('#next-page').disabled = pageNumber >= state.pdf.numPages;
+  $('#reader-columns').options[1].textContent = `双栏 · ${state.column === 0 ? '左栏' : '右栏'}`;
+  $('#prev-page').disabled = pageNumber <= 1 && state.column === 0;
+  $('#next-page').disabled = pageNumber >= state.pdf.numPages && state.column === state.columns - 1;
   $('#zoom-label').textContent = state.zoom === 1 ? '适合宽度' : `${Math.round(state.zoom * 100)}%`;
   $('#reader-status').textContent = '正在渲染…';
   readerFeedback(`正在加载第 ${pageNumber} 页…`);
+  const valid = () => generation === state.generation && serial === state.renderSerial;
   try {
     await paintFeedback();
-    if (generation !== state.generation || serial !== state.renderSerial) return;
+    if (!valid()) return;
     const page = await state.pdf.getPage(pageNumber);
     if (generation !== state.generation || pageNumber !== state.page || serial !== state.renderSerial) return;
     const base = page.getViewport({scale: 1});
-    const available = Math.max(160, Math.min(920, $('#reader-scroll').clientWidth - 32));
-    const scale = available / base.width * state.zoom;
+    const bounds = state.fit === 'content' ? await contentBounds(page, valid) : {left:0, top:0, right:1, bottom:1};
+    if (!valid() || !bounds) return;
+    let left = bounds.left + state.trim / 100, right = bounds.right - state.trim / 100;
+    if (state.columns === 2) {
+      const middle = (left + right) / 2;
+      if (state.column === 0) right = middle + .015;
+      else left = middle - .015;
+    }
+    const cropWidth = base.width * (right - left), cropHeight = base.height * (bounds.bottom - bounds.top);
+    const surface = $('#reader-scroll');
+    const style = getComputedStyle(surface);
+    const available = Math.max(120, Math.min(920, surface.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)));
+    const scale = available / cropWidth * state.zoom;
     const viewport = page.getViewport({scale});
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    // Render offscreen so a cancelled/slow page never clears the displayed page.
+    const width = cropWidth * scale, height = cropHeight * scale;
+    // Bound both pixel area and edge length to protect mobile canvas memory.
+    const ratio = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(10_000_000 / (width * height)), 8192 / Math.max(width, height));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width * ratio); canvas.height = Math.floor(viewport.height * ratio);
+    canvas.width = Math.max(1, Math.floor(width * ratio)); canvas.height = Math.max(1, Math.floor(height * ratio));
     const context = canvas.getContext('2d');
-    const task = page.render({canvasContext: context, canvas, viewport, transform: ratio === 1 ? null : [ratio,0,0,ratio,0,0]});
+    const task = page.render({canvasContext: context, canvas, viewport, transform: [ratio,0,0,ratio,-left * viewport.width * ratio,-bounds.top * viewport.height * ratio]});
     state.renderTask = task;
     await task.promise;
     if (generation !== state.generation || serial !== state.renderSerial) return;
     state.renderTask = null;
     const display = $('#pdf-canvas');
     display.width = canvas.width; display.height = canvas.height;
-    display.style.width = `${viewport.width}px`; display.style.height = `${viewport.height}px`;
+    display.style.width = `${width}px`; display.style.height = `${height}px`;
     display.getContext('2d').drawImage(canvas, 0, 0);
     display.hidden = false;
+    if (anchor) {
+      const rect = display.getBoundingClientRect();
+      surface.scrollBy(rect.left + anchor.x * rect.width - anchor.clientX, rect.top + anchor.y * rect.height - anchor.clientY);
+    }
     readerFeedback('', false);
-    $('#reader-status').textContent = `第 ${pageNumber} 页`;
+    $('#reader-status').textContent = `第 ${pageNumber} 页${state.columns === 2 ? (state.column === 0 ? ' · 左栏' : ' · 右栏') : ''}`;
   } catch (error) {
     if (error.name !== 'RenderingCancelledException' && generation === state.generation && serial === state.renderSerial) {
       state.renderTask = null;
@@ -263,13 +335,19 @@ async function renderPage() {
   }
 }
 
-function goToPage(page) {
+function goToPage(page, column = 0) {
   if (!state.pdf) return;
-  const next = Math.min(Math.max(Number(page) || 1, 1), state.pdf.numPages);
-  if (next === state.page) { $('#page-input').value = next; return; }
-  state.page = next; remember(state.reader, next);
+  const next = Math.min(Math.max(Math.trunc(Number(page)) || 1, 1), state.pdf.numPages);
+  if (next === state.page && column === state.column) { $('#page-input').value = next; return; }
+  state.page = next; state.column = column; remember(state.reader, next);
   $('#reader-scroll').scrollTo(0, 0);
   renderPage();
+}
+function stepReading(direction) {
+  if (!state.pdf) return;
+  const position = (state.page - 1) * state.columns + state.column + direction;
+  if (position < 0 || position >= state.pdf.numPages * state.columns) return;
+  goToPage(Math.floor(position / state.columns) + 1, position % state.columns);
 }
 
 async function closeReader() {
@@ -283,13 +361,34 @@ async function closeReader() {
 }
 
 function bindReaderGestures() {
-  const surface = $('#reader-scroll');
-  let gesture = null;
-  const reset = () => { gesture = null; surface.classList.remove('dragging'); };
+  const surface = $('#reader-scroll'), canvas = $('#pdf-canvas');
+  const points = new Map();
+  let gesture = null, pinch = null, lastTap = null, lastTouchZoom = -Infinity;
+  let wheel = null, wheelTimer, wheelZoom = null, zoomTimer;
+  const clearPreview = () => { canvas.style.transform = ''; canvas.style.transformOrigin = ''; };
+  const previewZoom = (zoom, anchor, dx = 0, dy = 0) => {
+    canvas.style.transformOrigin = `${anchor.x * canvas.clientWidth}px ${anchor.y * canvas.clientHeight}px`;
+    canvas.style.transform = `translate(${dx}px, ${dy}px) scale(${zoom / state.zoom})`;
+  };
+  const resetDrag = () => { gesture = null; surface.classList.remove('dragging'); };
+  const reset = () => {
+    resetDrag(); points.clear(); pinch = null; lastTap = null;
+    clearTimeout(wheelTimer); clearTimeout(zoomTimer); wheel = null; wheelZoom = null; clearPreview();
+  };
+  const distance = () => { const [a, b] = [...points.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  const midpoint = () => { const [a, b] = [...points.values()]; return {x:(a.x + b.x) / 2, y:(a.y + b.y) / 2}; };
   surface.addEventListener('pointerdown', event => {
-    // A second finger belongs to browser pinch zoom, never to pagination.
-    if (!event.isPrimary) { reset(); return; }
-    if (event.button !== 0 || !state.pdf || state.busy) return;
+    if (event.button !== 0 || !state.pdf || state.busy || wheelZoom) return;
+    points.set(event.pointerId, {x:event.clientX, y:event.clientY});
+    surface.setPointerCapture(event.pointerId);
+    if (points.size === 2) {
+      resetDrag(); lastTap = null;
+      const middle = midpoint();
+      pinch = {distance: Math.max(1, distance()), zoom:state.zoom, target:state.zoom,
+        anchor:zoomAnchor(middle.x, middle.y), generation:state.generation};
+      return;
+    }
+    if (points.size !== 1 || !event.isPrimary) return;
     gesture = {
       id: event.pointerId, x: event.clientX, y: event.clientY,
       left: surface.scrollLeft, top: surface.scrollTop,
@@ -297,9 +396,16 @@ function bindReaderGestures() {
       maxY: surface.scrollHeight - surface.clientHeight,
       generation: state.generation, serial: state.renderSerial,
     };
-    surface.setPointerCapture(event.pointerId);
   });
   surface.addEventListener('pointermove', event => {
+    if (!points.has(event.pointerId)) return;
+    points.set(event.pointerId, {x:event.clientX, y:event.clientY});
+    if (pinch && points.size === 2) {
+      pinch.target = Math.max(.5, Math.min(5, pinch.zoom * distance() / pinch.distance));
+      const middle = midpoint();
+      previewZoom(pinch.target, pinch.anchor, middle.x - pinch.anchor.clientX, middle.y - pinch.anchor.clientY);
+      return;
+    }
     if (!gesture || event.pointerId !== gesture.id) return;
     const dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
     if (!gesture.axis) {
@@ -308,29 +414,86 @@ function bindReaderGestures() {
       const delta = gesture.axis === 'x' ? dx : dy;
       const start = gesture.axis === 'x' ? gesture.left : gesture.top;
       const max = gesture.axis === 'x' ? gesture.maxX : gesture.maxY;
-      // Lock the decision at gesture start: reaching an edge while panning
-      // cannot unexpectedly turn a page during the same drag.
-      gesture.turn = max <= 2 || (delta > 0 ? start >= max - 2 : start <= 2);
+      // A finger moving left/up advances; panning has priority until the edge.
+      gesture.turn = max <= 2 || (delta < 0 ? start >= max - 2 : start <= 2);
     }
     surface.classList.add('dragging');
     if (!gesture.turn) surface.scrollTo(gesture.left - dx, gesture.top - dy);
   });
   surface.addEventListener('pointerup', event => {
-    if (!gesture || event.pointerId !== gesture.id) return;
     const current = gesture;
-    reset();
+    if (pinch) {
+      const currentPinch = pinch;
+      const middle = points.size === 2 ? midpoint() : {x:currentPinch.anchor.clientX, y:currentPinch.anchor.clientY};
+      pinch = null; resetDrag(); clearPreview();
+      if (currentPinch.generation === state.generation) setZoom(currentPinch.target, {...currentPinch.anchor, clientX:middle.x, clientY:middle.y});
+    }
+    points.delete(event.pointerId);
     if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
-    if (!current.turn || state.busy || current.generation !== state.generation || current.serial !== state.renderSerial) return;
+    if (!current || event.pointerId !== current.id) return;
+    resetDrag();
+    if (state.busy || current.generation !== state.generation || current.serial !== state.renderSerial) return;
     const dx = event.clientX - current.x, dy = event.clientY - current.y;
-    const delta = current.axis === 'x' ? dx : dy;
-    const cross = current.axis === 'x' ? dy : dx;
-    if (Math.abs(delta) < 60 || Math.abs(delta) < Math.abs(cross) * 1.2) return;
-    const next = state.page + Math.sign(delta);
-    if (next < 1 || next > state.pdf.numPages) { notify(next < 1 ? '已经是第一页' : '已经是最后一页'); return; }
-    goToPage(next);
+    if (Math.hypot(dx, dy) < 8 && event.pointerType === 'touch') {
+      const now = performance.now();
+      if (lastTap && now - lastTap.time < 320 && Math.hypot(lastTap.x - event.clientX, lastTap.y - event.clientY) < 24) {
+        lastTap = null; lastTouchZoom = now;
+        setZoom(state.zoom > 1.05 ? 1 : 2, zoomAnchor(event.clientX, event.clientY));
+      } else lastTap = {x:event.clientX, y:event.clientY, time:now};
+      return;
+    }
+    lastTap = null;
+    const delta = current.axis === 'x' ? dx : dy, cross = current.axis === 'x' ? dy : dx;
+    if (!current.turn || Math.abs(delta) < 60 || Math.abs(delta) < Math.abs(cross) * 1.2) return;
+    stepReading(-Math.sign(delta));
   });
   surface.addEventListener('pointercancel', reset);
-  surface.addEventListener('lostpointercapture', reset);
+  surface.addEventListener('lostpointercapture', event => {
+    if (points.has(event.pointerId)) reset();
+  });
+  surface.addEventListener('dblclick', event => {
+    if (!state.pdf || state.busy || performance.now() - lastTouchZoom < 500 || event.sourceCapabilities?.firesTouchEvents) return;
+    event.preventDefault(); setZoom(state.zoom > 1.05 ? 1 : 2, zoomAnchor(event.clientX, event.clientY));
+  });
+  surface.addEventListener('wheel', event => {
+    if (!state.pdf) return;
+    // Edge/Chrome trackpad pinch arrives as ctrl+wheel, distinct from scrolling.
+    if (event.ctrlKey) {
+      event.preventDefault();
+      if (state.busy || points.size) return;
+      if (!wheelZoom) wheelZoom = {zoom:state.zoom, anchor:zoomAnchor(event.clientX, event.clientY), generation:state.generation};
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? surface.clientHeight : 1;
+      wheelZoom.zoom = Math.max(.5, Math.min(5, wheelZoom.zoom * Math.exp(-event.deltaY * unit * .005)));
+      previewZoom(wheelZoom.zoom, wheelZoom.anchor);
+      clearTimeout(zoomTimer);
+      zoomTimer = setTimeout(() => {
+        const current = wheelZoom; wheelZoom = null; clearPreview();
+        if (current && current.generation === state.generation) setZoom(current.zoom, current.anchor);
+      }, 140);
+      return;
+    }
+    event.preventDefault(); // Contain horizontal overscroll/history navigation too.
+    if (points.size || wheelZoom) return;
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? surface.clientHeight : 1;
+    const dx = event.deltaX * unit, dy = event.deltaY * unit;
+    if (!wheel) wheel = {x:0, y:0, left:surface.scrollLeft, top:surface.scrollTop,
+      maxX:surface.scrollWidth - surface.clientWidth, maxY:surface.scrollHeight - surface.clientHeight, turned:false};
+    clearTimeout(wheelTimer); wheelTimer = setTimeout(() => { wheel = null; }, 240);
+    wheel.x += dx; wheel.y += dy;
+    if (wheel.turned || state.busy) return;
+    if (!wheel.axis && Math.max(Math.abs(wheel.x), Math.abs(wheel.y)) >= 12) {
+      wheel.axis = Math.abs(wheel.x) > Math.abs(wheel.y) ? 'x' : 'y';
+      const delta = wheel.axis === 'x' ? wheel.x : wheel.y;
+      const start = wheel.axis === 'x' ? wheel.left : wheel.top;
+      const max = wheel.axis === 'x' ? wheel.maxX : wheel.maxY;
+      wheel.turn = max <= 2 || (delta > 0 ? start >= max - 2 : start <= 2);
+    }
+    if (!wheel.turn) { surface.scrollBy(dx, dy); return; }
+    const delta = wheel.axis === 'x' ? wheel.x : wheel.y, cross = wheel.axis === 'x' ? wheel.y : wheel.x;
+    if (Math.abs(delta) >= 100 && Math.abs(delta) >= Math.abs(cross) * 1.2) {
+      wheel.turned = true; stepReading(Math.sign(delta));
+    }
+  }, {passive:false});
   $('#reader').addEventListener('close', reset);
 }
 
@@ -350,18 +513,28 @@ function bindEvents() {
   });
   $('#reader').addEventListener('close', () => { if (!$('#reader').open && state.reader) closeReader(); });
   $('#reader-back').addEventListener('click', closeReader); $('#reader-close').addEventListener('click', closeReader);
-  $('#prev-page').addEventListener('click', () => goToPage(state.page - 1));
-  $('#next-page').addEventListener('click', () => goToPage(state.page + 1));
+  $('#prev-page').addEventListener('click', () => stepReading(-1));
+  $('#next-page').addEventListener('click', () => stepReading(1));
   $('#page-input').addEventListener('change', event => goToPage(event.target.value));
-  $('#zoom-in').addEventListener('click', () => { state.zoom = Math.min(state.zoom + .2, 3); renderPage(); });
-  $('#zoom-out').addEventListener('click', () => { state.zoom = Math.max(state.zoom - .2, .4); renderPage(); });
+  $('#zoom-in').addEventListener('click', () => setZoom(state.zoom + .2));
+  $('#zoom-out').addEventListener('click', () => setZoom(state.zoom - .2));
+  $('#reader-fit').addEventListener('change', event => { state.fit = event.target.value; state.zoom = 1; $('#reader-scroll').scrollTo(0, 0); renderPage(); });
+  $('#reader-trim').addEventListener('input', event => { $('#reader-trim-value').textContent = `${event.target.value}%`; });
+  $('#reader-trim').addEventListener('change', event => { state.trim = Number(event.target.value); renderPage(); });
+  $('#reader-columns').addEventListener('change', event => { state.columns = Number(event.target.value); state.column = 0; state.zoom = 1; $('#reader-scroll').scrollTo(0, 0); renderPage(); });
+  $('#reader-reset').addEventListener('click', () => {
+    state.fit = 'page'; state.trim = 0; state.columns = 1; state.column = 0; state.zoom = 1;
+    $('#reader-fit').value = 'page'; $('#reader-trim').value = 0; $('#reader-trim-value').textContent = '0%'; $('#reader-columns').value = '1';
+    $('#reader-scroll').scrollTo(0, 0); renderPage();
+  });
   document.addEventListener('keydown', event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { if (!state.reader) { event.preventDefault(); $('#search-input').focus(); } }
     if (event.key === 'Escape' && !state.reader && $('#sidebar').classList.contains('open')) {
       $('#sidebar').classList.remove('open'); $('#menu-button').setAttribute('aria-expanded', 'false'); $('#menu-button').focus();
     }
-    if (state.reader && event.key === 'ArrowLeft' && event.target.tagName !== 'INPUT') goToPage(state.page - 1);
-    if (state.reader && event.key === 'ArrowRight' && event.target.tagName !== 'INPUT') goToPage(state.page + 1);
+    if (state.reader && !['INPUT', 'SELECT'].includes(event.target.tagName) && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault(); stepReading(event.key === 'ArrowRight' ? 1 : -1);
+    }
   });
   let resizeTimer;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.reader) renderPage(); }, 180); });

@@ -67,7 +67,13 @@
   <dialog id="reader" class="reader" aria-labelledby="reader-title">
     <div class="reader-header"><button id="reader-back" autofocus class="reader-back" aria-label="返回灰库">← <span>返回灰库</span></button><div class="reader-identity"><h2 id="reader-title"></h2><small id="reader-topic"></small></div><div class="reader-actions"><a id="reader-download" href="#" download title="下载原文件" aria-label="下载原文件">↓</a><button id="reader-close" aria-label="关闭阅读器">×</button></div></div>
     <div class="reader-toolbar"><div class="pager"><button id="prev-page" aria-label="上一页">‹</button><label><input id="page-input" type="number" min="1" value="1" aria-label="页码"> <span>/ <span id="page-count">–</span></span></label><button id="next-page" aria-label="下一页">›</button></div><div class="zoom"><button id="zoom-out" aria-label="缩小">−</button><span id="zoom-label">适合宽度</span><button id="zoom-in" aria-label="放大">+</button></div><span id="reader-status" role="status"></span></div>
-    <p id="reader-hint" class="reader-hint">拖动或滑动：↓ / → 下一页，↑ / ← 上一页；长页或放大后先浏览内容，到边缘再翻页</p>
+    <div class="reader-options" aria-label="阅读设置">
+      <select id="reader-fit" aria-label="适宽方式"><option value="page">整页适宽</option><option value="content">正文适宽</option></select>
+      <label class="reader-trim">裁边 <input id="reader-trim" type="range" min="0" max="12" step="1" value="0" aria-label="左右额外裁边百分比"><output id="reader-trim-value" for="reader-trim">0%</output></label>
+      <select id="reader-columns" aria-label="分栏阅读"><option value="1">整页阅读</option><option value="2">双栏阅读</option></select>
+      <button id="reader-reset" type="button">还原整页</button>
+    </div>
+    <p id="reader-hint" class="reader-hint">← / ↑ 下一页，→ / ↓ 上一页；双击放大，双指缩放；长页或放大后先浏览，到边缘再翻页</p>
     <div class="reader-body">
       <div id="reader-scroll" class="reader-scroll" tabindex="0" role="region" aria-label="PDF 阅读区域" aria-busy="false" aria-describedby="reader-hint"><canvas id="pdf-canvas" aria-label="PDF 页面" hidden></canvas></div>
       <div id="reader-loading" class="reader-loading" hidden><progress class="loading-spinner" aria-label="正在加载 PDF"></progress><span id="reader-loading-text" role="status">正在打开 PDF…</span></div>
