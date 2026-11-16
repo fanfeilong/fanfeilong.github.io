@@ -12,7 +12,7 @@ const state = {
   localMode: false, reviews: {}, reviewFilter: 'all',
   books: [], view: 'all', category: '', topic: '', type: '', query: '', sort: 'name', layout: 'grid',
   favorites: readStore('book-library-favorites', []), recent: readStore('book-library-recent', {}),
-  reader: null, pdf: null, loadingTask: null, renderTask: null, page: 1, zoom: 1, generation: 0, renderSerial: 0,
+  reader: null, pdf: null, loadingTask: null, renderTask: null, page: 1, zoom: 1, generation: 0, renderSerial: 0, busy: false,
 };
 
 function readStore(key, fallback) {
@@ -156,6 +156,17 @@ function remember(book, page = 1) {
   saveStore('book-library-recent', state.recent);
 }
 
+function readerFeedback(message, busy = true) {
+  state.busy = busy;
+  $('#reader-scroll').setAttribute('aria-busy', String(busy));
+  $('#reader-loading').hidden = !message;
+  $('#reader-loading-text').textContent = message;
+  $('#reader-loading progress').hidden = !busy;
+}
+
+// Allow the loading state to paint before PDF.js starts CPU-heavy work.
+const paintFeedback = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
 async function openBook(book) {
   if (book.extension !== 'pdf') { remember(book); render(); window.open(fileUrl(book), '_blank', 'noopener'); return; }
   await closeReader();
@@ -166,10 +177,15 @@ async function openBook(book) {
   $('#reader-topic').textContent = `${niceName(book.category)} / ${niceName(book.topic)}`;
   $('#reader-download').href = fileUrl(book);
   $('#reader-download').download = `${book.name}.pdf`;
-  $('#pdf-canvas').hidden = true; $('#reader-loading').hidden = false;
-  $('#reader-loading').textContent = '正在打开 PDF…'; $('#reader-status').textContent = '';
+  $('#pdf-canvas').hidden = true;
+  readerFeedback('正在打开 PDF…'); $('#reader-status').textContent = '';
+  $('#page-input').value = 1; $('#page-count').textContent = '–';
+  for (const id of ['prev-page', 'next-page', 'page-input', 'zoom-in', 'zoom-out']) $(`#${id}`).disabled = true;
+  $('#reader-scroll').scrollTo(0, 0);
   state.zoom = 1;
   try {
+    await paintFeedback();
+    if (generation !== state.generation) return;
     const pdfjsLib = await loadPdfjs();
     if (generation !== state.generation) return;
     state.loadingTask = pdfjsLib.getDocument({
@@ -179,16 +195,23 @@ async function openBook(book) {
       wasmUrl: new URL('./vendor/pdfjs/wasm/', import.meta.url).href,
       useSystemFonts: true,
     });
+    state.loadingTask.onProgress = ({loaded, total}) => {
+      if (generation === state.generation && !state.pdf) {
+        readerFeedback(total > 0 ? `正在下载 PDF… ${Math.min(100, Math.round(loaded / total * 100))}%` : '正在下载 PDF…');
+      }
+    };
     const pdf = await state.loadingTask.promise;
     if (generation !== state.generation) return;
     state.pdf = pdf;
     state.page = Math.min(Math.max(state.recent[book.path]?.page || 1, 1), pdf.numPages);
     $('#page-count').textContent = pdf.numPages;
+    $('#page-input').max = pdf.numPages;
+    for (const id of ['page-input', 'zoom-in', 'zoom-out']) $(`#${id}`).disabled = false;
     remember(book, state.page);
     await renderPage();
   } catch (error) {
     if (generation !== state.generation) return;
-    $('#reader-loading').textContent = `无法打开 PDF：${error.message || error}`;
+    readerFeedback(`无法打开 PDF：${error.message || error}`, false);
     $('#reader-status').textContent = '打开失败';
   }
 }
@@ -204,7 +227,10 @@ async function renderPage() {
   $('#next-page').disabled = pageNumber >= state.pdf.numPages;
   $('#zoom-label').textContent = state.zoom === 1 ? '适合宽度' : `${Math.round(state.zoom * 100)}%`;
   $('#reader-status').textContent = '正在渲染…';
+  readerFeedback(`正在加载第 ${pageNumber} 页…`);
   try {
+    await paintFeedback();
+    if (generation !== state.generation || serial !== state.renderSerial) return;
     const page = await state.pdf.getPage(pageNumber);
     if (generation !== state.generation || pageNumber !== state.page || serial !== state.renderSerial) return;
     const base = page.getViewport({scale: 1});
@@ -212,17 +238,26 @@ async function renderPage() {
     const scale = available / base.width * state.zoom;
     const viewport = page.getViewport({scale});
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    const canvas = $('#pdf-canvas');
+    // Render offscreen so a cancelled/slow page never clears the displayed page.
+    const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width * ratio); canvas.height = Math.floor(viewport.height * ratio);
-    canvas.style.width = `${viewport.width}px`; canvas.style.height = `${viewport.height}px`;
-    canvas.hidden = false; $('#reader-loading').hidden = true;
     const context = canvas.getContext('2d');
-    state.renderTask = page.render({canvasContext: context, canvas, viewport, transform: ratio === 1 ? null : [ratio,0,0,ratio,0,0]});
-    await state.renderTask.promise;
-    if (generation === state.generation && pageNumber === state.page && serial === state.renderSerial) $('#reader-status').textContent = `第 ${pageNumber} 页`;
+    const task = page.render({canvasContext: context, canvas, viewport, transform: ratio === 1 ? null : [ratio,0,0,ratio,0,0]});
+    state.renderTask = task;
+    await task.promise;
+    if (generation !== state.generation || serial !== state.renderSerial) return;
+    state.renderTask = null;
+    const display = $('#pdf-canvas');
+    display.width = canvas.width; display.height = canvas.height;
+    display.style.width = `${viewport.width}px`; display.style.height = `${viewport.height}px`;
+    display.getContext('2d').drawImage(canvas, 0, 0);
+    display.hidden = false;
+    readerFeedback('', false);
+    $('#reader-status').textContent = `第 ${pageNumber} 页`;
   } catch (error) {
     if (error.name !== 'RenderingCancelledException' && generation === state.generation && serial === state.renderSerial) {
-      $('#reader-loading').hidden = false; $('#reader-loading').textContent = `页面渲染失败：${error.message || error}`;
+      state.renderTask = null;
+      readerFeedback(`页面渲染失败：${error.message || error}`, false);
       $('#reader-status').textContent = '渲染失败';
     }
   }
@@ -233,7 +268,7 @@ function goToPage(page) {
   const next = Math.min(Math.max(Number(page) || 1, 1), state.pdf.numPages);
   if (next === state.page) { $('#page-input').value = next; return; }
   state.page = next; remember(state.reader, next);
-  $('#reader-scroll').scrollTop = 0;
+  $('#reader-scroll').scrollTo(0, 0);
   renderPage();
 }
 
@@ -243,10 +278,64 @@ async function closeReader() {
   if (state.renderTask) { state.renderTask.cancel(); state.renderTask = null; }
   if (state.loadingTask) { try { await state.loadingTask.destroy(); } catch {} state.loadingTask = null; }
   state.pdf = null; state.reader = null;
+  readerFeedback('', false);
   if ($('#reader').open) $('#reader').close();
 }
 
+function bindReaderGestures() {
+  const surface = $('#reader-scroll');
+  let gesture = null;
+  const reset = () => { gesture = null; surface.classList.remove('dragging'); };
+  surface.addEventListener('pointerdown', event => {
+    // A second finger belongs to browser pinch zoom, never to pagination.
+    if (!event.isPrimary) { reset(); return; }
+    if (event.button !== 0 || !state.pdf || state.busy) return;
+    gesture = {
+      id: event.pointerId, x: event.clientX, y: event.clientY,
+      left: surface.scrollLeft, top: surface.scrollTop,
+      maxX: surface.scrollWidth - surface.clientWidth,
+      maxY: surface.scrollHeight - surface.clientHeight,
+      generation: state.generation, serial: state.renderSerial,
+    };
+    surface.setPointerCapture(event.pointerId);
+  });
+  surface.addEventListener('pointermove', event => {
+    if (!gesture || event.pointerId !== gesture.id) return;
+    const dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
+    if (!gesture.axis) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 8) return;
+      gesture.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      const delta = gesture.axis === 'x' ? dx : dy;
+      const start = gesture.axis === 'x' ? gesture.left : gesture.top;
+      const max = gesture.axis === 'x' ? gesture.maxX : gesture.maxY;
+      // Lock the decision at gesture start: reaching an edge while panning
+      // cannot unexpectedly turn a page during the same drag.
+      gesture.turn = max <= 2 || (delta > 0 ? start >= max - 2 : start <= 2);
+    }
+    surface.classList.add('dragging');
+    if (!gesture.turn) surface.scrollTo(gesture.left - dx, gesture.top - dy);
+  });
+  surface.addEventListener('pointerup', event => {
+    if (!gesture || event.pointerId !== gesture.id) return;
+    const current = gesture;
+    reset();
+    if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
+    if (!current.turn || state.busy || current.generation !== state.generation || current.serial !== state.renderSerial) return;
+    const dx = event.clientX - current.x, dy = event.clientY - current.y;
+    const delta = current.axis === 'x' ? dx : dy;
+    const cross = current.axis === 'x' ? dy : dx;
+    if (Math.abs(delta) < 60 || Math.abs(delta) < Math.abs(cross) * 1.2) return;
+    const next = state.page + Math.sign(delta);
+    if (next < 1 || next > state.pdf.numPages) { notify(next < 1 ? '已经是第一页' : '已经是最后一页'); return; }
+    goToPage(next);
+  });
+  surface.addEventListener('pointercancel', reset);
+  surface.addEventListener('lostpointercapture', reset);
+  $('#reader').addEventListener('close', reset);
+}
+
 function bindEvents() {
+  bindReaderGestures();
   document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
   $('#search-input').addEventListener('input', event => { state.query = event.target.value; render(); });
   $('#topic-select').addEventListener('change', event => { state.topic = event.target.value; render(); });

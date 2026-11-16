@@ -114,6 +114,102 @@ test('embedded PDF: render, page navigation, zoom, Escape and focus restoration'
   await page.locator('#reader-close').click(); await page.close();
 });
 
+test('PDF loading feedback, mouse/touch gestures, boundaries and long-page panning', async () => {
+  const context = await browser.newContext({viewport:{width:1000,height:1800},hasTouch:true});
+  const page = await context.newPage();
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  const sample = books.find(b=>b.path.endsWith('04structured-design.pdf')) || books.find(b=>b.extension==='pdf' && b.size>100000 && b.size<500000);
+  let release;
+  const downloadGate = new Promise(resolve => { release = resolve; });
+  await page.route(/\.pdf(?:\?|$)/i, async route => { await downloadGate; await route.continue(); });
+  await page.goto(staticBase);
+  await page.locator('#search-input').fill(sample.name);
+  await page.locator('.book-title').filter({hasText:sample.name}).first().click();
+  await page.locator('#reader-loading').waitFor({state:'visible'});
+  assert.equal(await page.locator('#reader-scroll').getAttribute('aria-busy'),'true');
+  assert.equal(await page.locator('#reader-loading progress').isVisible(),true);
+  assert.equal(await page.locator('#next-page').isDisabled(),true);
+  await page.screenshot({path:'artifacts/pdf-opening.png'});
+  release();
+  const atPage = async number => {
+    await page.waitForFunction(n => document.querySelector('#reader-status').textContent === `第 ${n} 页`, number);
+    assert.equal(await page.locator('#reader-loading').isVisible(),false);
+    assert.equal(await page.locator('#reader-scroll').getAttribute('aria-busy'),'false');
+  };
+  await atPage(1);
+  const busy = await page.locator('#next-page').evaluate(button => {
+    button.click();
+    return {visible: !document.querySelector('#reader-loading').hidden, text:document.querySelector('#reader-loading-text').textContent};
+  });
+  assert.equal(busy.visible,true); assert.match(busy.text,/第 2 页/);
+  await atPage(2);
+  const bounds = await page.locator('#reader-scroll').boundingBox();
+  const x = bounds.x + bounds.width / 2, y = bounds.y + 250;
+  const drag = async (dx,dy) => {
+    await page.mouse.move(x,y); await page.mouse.down();
+    await page.mouse.move(x+dx,y+dy,{steps:8}); await page.mouse.up();
+  };
+  await drag(120,0); await atPage(3);
+  await drag(-120,0); await atPage(2);
+  await drag(0,120); await atPage(3);
+  await drag(0,-120); await atPage(2);
+  await drag(20,0); await atPage(2);
+  // Real touch input exercises browser pointer capture and touch-action handling.
+  const session = await context.newCDPSession(page);
+  const swipe = async (dx,dy) => {
+    await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+    for(let i=1;i<=5;i++) await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+dx*i/5,y:y+dy*i/5}]});
+    await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  };
+  await swipe(120,0); await atPage(3);
+  await swipe(-120,0); await atPage(2);
+  await swipe(0,120); await atPage(3);
+  await swipe(0,-120); await atPage(2);
+  await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+  await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+120,y}]});
+  await session.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+  await atPage(2);
+  await page.locator('#prev-page').click(); await atPage(1);
+  await drag(-120,0); await atPage(1);
+  await page.locator('#page-input').fill(await page.locator('#page-count').textContent());
+  await page.locator('#page-input').press('Enter'); await page.locator('#reader-hint').click();
+  const last = Number(await page.locator('#page-count').textContent());
+  await atPage(last); await drag(120,0); await atPage(last);
+  // A long page pans first; one drag reaching its edge must not turn it.
+  await page.setViewportSize({width:1000,height:700});
+  await page.waitForTimeout(250); await atPage(last);
+  await page.locator('#reader-scroll').evaluate(el => el.scrollTop = 150);
+  const before = await page.locator('#reader-scroll').evaluate(el => el.scrollTop);
+  await drag(0,-100);
+  assert.ok(await page.locator('#reader-scroll').evaluate(el => el.scrollTop) > before);
+  await atPage(last);
+  await page.screenshot({path:'artifacts/pdf-reader.png'});
+  const axe = await new AxeBuilder({page}).analyze();
+  assert.deepEqual(axe.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),[]);
+  await page.locator('#reader-close').click();
+  assert.deepEqual(errors,[]);
+  await context.close();
+});
+
+test('PDF download failure clears busy state and allows closing/reopening', async () => {
+  const context = await browser.newContext({viewport:{width:390,height:844}});
+  const page = await context.newPage();
+  const sample = books.find(b=>b.extension==='pdf' && b.size>100000 && b.size<500000);
+  await page.route(/\.pdf(?:\?|$)/i, route => route.abort());
+  await page.goto(staticBase); await page.locator('#search-input').fill(sample.name);
+  const opener = page.locator('.book-title').filter({hasText:sample.name}).first();
+  await opener.click();
+  await page.locator('#reader-loading-text').filter({hasText:'无法打开 PDF'}).waitFor();
+  assert.equal(await page.locator('#reader-scroll').getAttribute('aria-busy'),'false');
+  assert.equal(await page.locator('#reader-loading progress').isVisible(),false);
+  await page.locator('#reader-close').click();
+  await page.unroute(/\.pdf(?:\?|$)/i);
+  await opener.click();
+  await page.waitForFunction(()=>document.querySelector('#reader-status').textContent==='第 1 页');
+  await page.screenshot({path:'artifacts/pdf-mobile.png'});
+  await context.close();
+});
+
 test('local review: all file formats, UI marking and reset, persistence, fingerprints, original bytes untouched', async () => {
   const page=await (await browser.newContext({viewport:{width:1440,height:1000}})).newPage();
   await page.goto(localBase); await page.locator('.review-banner').waitFor();

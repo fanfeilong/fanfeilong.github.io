@@ -11,3 +11,21 @@
 .brand{text-decoration:none;color:inherit}.brand-mark{background:#52605b}.category-item{flex-shrink:0}.topbar{height:auto;min-block-size:var(--zs-fn-header-height);gap:12px;flex-wrap:wrap;padding-block:10px}.topbar-right{display:flex;flex:1 1 auto;justify-content:flex-end;flex-wrap:wrap;gap:10px 20px;min-inline-size:0}.site-links{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:6px 18px}.site-links a{display:inline-flex;align-items:center;min-block-size:32px;text-decoration:none;font-size:.75rem;color:#3c5144;white-space:nowrap}.site-links a:hover{text-decoration:underline;text-underline-offset:4px}.local-badge{white-space:nowrap}.sidebar-foot{flex-shrink:0}@media(max-width:800px){.topbar-right{flex-basis:100%;margin-inline-start:auto}.site-links{gap:4px 16px}.topbar-right .local-badge{margin-inline-end:auto}.sidebar{padding-bottom:24px}}@media(max-width:480px){.topbar-right{display:flex}.topbar-right .local-badge{display:none}.site-links{gap:4px 13px}.site-links a{font-size:.7rem;min-block-size:36px}}
 
 .breadcrumb a{text-decoration:underline;text-underline-offset:3px}
+
+/* Loading stays in the viewport even while a long PDF page is scrolled. */
+.reader-header,.reader-toolbar{flex-shrink:0}
+.reader-hint{flex-shrink:0;margin:0;padding:7px 12px;text-align:center;font-size:11px;line-height:1.5;color:#4f6154;background:#f8faf8}
+.reader-body{position:relative;display:flex;flex:1;min-height:0;min-width:0}
+.reader-scroll{touch-action:pinch-zoom;cursor:grab;-webkit-user-select:none;user-select:none;justify-content:safe center}
+.reader-scroll.dragging{cursor:grabbing}
+.reader-scroll[aria-busy="true"]{cursor:progress}
+.reader-scroll[aria-busy="true"] canvas{opacity:.35}
+.reader-loading{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;margin:0;padding:24px;background:#e8ebe7bb;color:#334b3b;font-size:14px;text-align:center;overflow-wrap:anywhere;pointer-events:none}
+progress.loading-spinner:indeterminate{appearance:none;inline-size:36px;block-size:36px;flex-shrink:0;border:3px solid #b6c4b9;border-top-color:#3f634b;border-radius:50%;background:transparent;animation:reader-spin .8s linear infinite}
+progress.loading-spinner::-webkit-progress-bar{display:none}
+progress.loading-spinner::-moz-progress-bar{background:transparent}
+@keyframes reader-spin{to{transform:rotate(1turn)}}
+@media(prefers-reduced-motion:reduce){progress.loading-spinner:indeterminate{animation-duration:6s}}
+@media(forced-colors:active){progress.loading-spinner:indeterminate{forced-color-adjust:none;border-color:GrayText;border-top-color:CanvasText}}
+
+.reader-identity small,#reader-status{color:#536459}
