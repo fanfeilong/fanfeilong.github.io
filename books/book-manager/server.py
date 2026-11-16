@@ -195,6 +195,21 @@ REVIEW_LOCK = threading.Lock()
 STATE_FILE = None
 
 
+def resource_entries():
+    registry = APP / "resources.json"
+    if not registry.is_file():
+        return []
+    entries = json.loads(registry.read_text(encoding="utf-8"))["resources"]
+    ids, paths = set(), set()
+    for entry in entries:
+        identifier, path = entry["id"], entry["path"]
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", identifier) or identifier in ids or path in paths:
+            raise ValueError("Resource IDs and paths must be unique; IDs use lowercase letters, digits and hyphens")
+        ids.add(identifier)
+        paths.add(path)
+    return entries
+
+
 def catalog():
     result = [item for item in books() if item["path"] != "分类索引.md"]
     for path in SITE.iterdir():
@@ -203,7 +218,8 @@ def catalog():
             result.append({"path": "../" + path.name, "name": path.stem,
                            "extension": path.suffix.lower()[1:], "category": "历史资料",
                            "topic": "旧站收藏", "size": stat.st_size, "modified": int(stat.st_mtime)})
-    return sorted(result, key=lambda item: item["path"].casefold())
+    ids = {entry["path"]: entry["id"] for entry in resource_entries()}
+    return sorted(({**book, "id": ids.get(book["path"])} for book in result), key=lambda item: item["path"].casefold())
 
 
 def hash_stream(stream):

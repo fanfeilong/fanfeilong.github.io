@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, stat, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { chromium } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
@@ -58,6 +59,12 @@ test('home and library: responsive layout, category deep links, search, favorite
   assert.equal(await page.locator('.brand strong').textContent(), '灰库');
   assert.equal(await page.locator('.site-links a').count(), 5);
   assert.equal(await page.locator('.archive-nav, .archive-label').count(), 0);
+  assert.equal(await page.locator('.page-heading, .summary, .stat').count(),0);
+  assert.equal(await page.locator('.search-cluster .summary-inline').count(),1);
+  assert.equal(Number(await page.locator('#stat-books').textContent()),books.length);
+  assert.equal(Number(await page.locator('#stat-pdfs').textContent()),books.filter(book=>book.extension==='pdf').length);
+  const searchBounds=await page.locator('.search-cluster').boundingBox();
+  assert.ok(searchBounds.height<=44,'desktop statistics share one compact row with search');
   await page.screenshot({path:'artifacts/home-desktop.png',fullPage:true});
   let axe = await new AxeBuilder({page}).analyze();
   assert.deepEqual(axe.violations.map(v=>({id:v.id,nodes:v.nodes.slice(0,12).map(n=>n.target),count:v.nodes.length})),[]);
@@ -84,6 +91,10 @@ test('home and library: responsive layout, category deep links, search, favorite
     const navBounds = await page.locator('.site-links').boundingBox();
     assert.ok(navBounds.x + navBounds.width <= width);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`home ${width}`);
+    const counts=await page.locator('.summary-inline span').all();
+    const countBounds=await Promise.all(counts.map(count=>count.boundingBox()));
+    assert.ok(countBounds.every(bounds=>Math.abs(bounds.y-countBounds[0].y)<1),'mobile statistics stay on one line');
+    assert.ok((await page.locator('.search-cluster').boundingBox()).height<=80,'mobile search and counts form a compact shared control');
     if(width===390) await page.screenshot({path:'artifacts/home-mobile.png',fullPage:true});
     await page.goto(staticBase); await page.locator('.book-title').first().waitFor();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,`library ${width}`);
@@ -368,6 +379,117 @@ test('PDF download failure clears busy state and allows closing/reopening', asyn
   await page.waitForFunction(()=>document.querySelector('#reader-status').textContent==='第 1 页');
   await page.screenshot({path:'artifacts/pdf-mobile.png'});
   await context.close();
+});
+
+test('resource pages: real static entries, matching metadata and fingerprinted shared assets', async () => {
+  assert.equal(new Set(books.map(book=>book.id)).size,books.length);
+  const home=await (await fetch(staticBase)).text();
+  const script=/src="(books\/book-manager\/app\.[a-f0-9]{16}\.js)"/.exec(home)?.[1];
+  const style=/href="(books\/book-manager\/style\.[a-f0-9]{16}\.css)"/.exec(home)?.[1];
+  assert.ok(script);assert.ok(style);
+  for(const book of books){
+    const response=await fetch(`${staticBase}/read/${book.id}/?page=2`);assert.equal(response.status,200,book.id);
+    const html=await response.text();assert.ok(html.includes('<base href="../../">'));
+    assert.ok(html.includes(script));assert.ok(html.includes(style));
+    assert.ok(html.includes(`https://fanfeilong.github.io/read/${book.id}/`));
+    assert.ok(html.includes('property="og:title"'));
+    assert.equal((await fetch(`${localBase}/read/${book.id}/`,{method:'HEAD'})).status,200);
+  }
+  assert.match(await readFile('dist/404.html','utf8'),/资源不存在或已移除/);
+});
+
+test('share URL: explicit page overrides progress, survives fresh sessions/reload, copies and navigates history', async () => {
+  const sample=books.find(book=>book.id==='linux-internals');
+  const context=await browser.newContext({viewport:{width:390,height:844},permissions:['clipboard-read','clipboard-write']});
+  const page=await context.newPage(), errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const url=`${staticBase}/read/${sample.id}/?page=6`;
+  await page.goto(url);await readerAt(page,6);
+  assert.ok((await page.title()).includes(sample.name));
+  assert.equal(await page.locator('#reader-settings').isVisible(),false);
+  assert.equal(await page.locator('#reader-share').isEnabled(),true);
+  await page.locator('#reader-share').click();
+  await page.waitForFunction(()=>document.querySelector('#reader-share-status').textContent.includes('已复制第 6 页'));
+  assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),url);
+  // A different session has conflicting local progress, but the shared page wins.
+  const receiver=await browser.newContext();
+  await receiver.addInitScript(({path})=>localStorage.setItem('book-library-recent',JSON.stringify({[path]:{page:30,at:1}})),{path:sample.path});
+  const received=await receiver.newPage();await received.goto(url);await readerAt(received,6);
+  await received.reload();await readerAt(received,6);
+  const historyLength=await received.evaluate(()=>history.length);
+  let navigations=0;received.on('request',request=>{if(request.isNavigationRequest()&&request.frame()===received.mainFrame())navigations++;});
+  await received.locator('#reader-settings-toggle').click();await received.locator('#next-page').click();await readerAt(received,7);
+  assert.equal(new URL(received.url()).searchParams.get('page'),'7');
+  assert.equal(await received.evaluate(()=>history.length),historyLength);assert.equal(navigations,0);
+  await received.locator('#reader-close').click();assert.equal(new URL(received.url()).pathname,'/');
+  await received.locator('#search-input').fill(sample.name);await received.locator('.book-title').filter({hasText:sample.name}).first().click();await readerAt(received,7);
+  await received.goBack();await received.waitForFunction(()=>!document.querySelector('#reader').open);
+  assert.equal(new URL(received.url()).pathname,'/');
+  await received.goForward();await readerAt(received,7);
+  // Denial is visible, offers a selectable link and preserves focus on dismissal.
+  await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:()=>Promise.reject(new DOMException('Denied','NotAllowedError'))},configurable:true}));
+  await page.locator('#reader-share').click();await page.locator('#reader-share-panel').waitFor({state:'visible'});
+  assert.equal(await page.locator('#reader-share-link').inputValue(),url);
+  assert.equal(await page.locator('#reader-share-link').evaluate(el=>el.selectionEnd-el.selectionStart),url.length);
+  await page.locator('#reader-share-done').click();assert.equal(await page.locator('#reader-share').evaluate(el=>document.activeElement===el),true);
+  await page.screenshot({path:'artifacts/pdf-sharing-mobile.png'});
+  assert.equal(await page.evaluate(()=>document.querySelector('#reader').scrollWidth<=innerWidth),true);
+  const axe=await new AxeBuilder({page}).analyze();assert.deepEqual(axe.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)})),[]);
+  assert.deepEqual(errors,[]);await receiver.close();await context.close();
+});
+
+test('shared page validation, readable unavailable state, and copy fallback without invoker commands', async () => {
+  const context=await browser.newContext();
+  await context.addInitScript(()=>{
+    delete window.CommandEvent;
+    Object.defineProperty(navigator,'clipboard',{value:{writeText:()=>Promise.reject(new DOMException('Denied','NotAllowedError'))},configurable:true});
+  });
+  const page=await context.newPage();
+  for(const [query,expected] of [['0',1],['-2',1],['abc',1],['2.5',1],['999999',42]]){
+    await page.goto(`${staticBase}/read/linux-internals/?page=${query}`);await readerAt(page,expected);
+    assert.equal(new URL(page.url()).searchParams.get('page'),String(expected));
+  }
+  await page.locator('#reader-share').click();await page.locator('#reader-share-panel').waitFor({state:'visible'});
+  assert.equal(await page.locator('#reader-share-link').inputValue(),`${staticBase}/read/linux-internals/?page=42`);
+  // Simulate a retained static entry whose resource was later removed.
+  const shell=await readFile('dist/read/linux-internals/index.html','utf8');
+  await page.route('**/read/removed-resource/',route=>route.fulfill({contentType:'text/html',body:shell}));
+  await page.goto(`${staticBase}/read/removed-resource/`);
+  await page.locator('#resource-error').waitFor({state:'visible'});
+  assert.match(await page.locator('#resource-error-text').textContent(),/不存在或已移除/);
+  assert.equal(await page.locator('#reader').evaluate(el=>el.open),false);
+  await context.close();
+});
+
+test('cached old scripts cannot replace fingerprinted assets in a newly loaded page', async () => {
+  let legacyRequests=0;
+  const server=createServer(async(request,response)=>{
+    try{
+      const pathname=new URL(request.url,'http://localhost').pathname;
+      if(pathname==='/warmup'){
+        response.setHeader('Content-Type','text/html');response.end('<script type="module" src="/books/book-manager/app.js"></script>');return;
+      }
+      if(pathname==='/books/book-manager/app.js'){
+        legacyRequests++;response.setHeader('Content-Type','text/javascript');response.setHeader('Cache-Control','public,max-age=86400,immutable');response.end('window.legacyReader=true;');return;
+      }
+      let path=decodeURIComponent(pathname).replace(/^\//,'');if(!path||path.endsWith('/'))path+='index.html';
+      if(path.split('/').includes('..')){response.writeHead(400);response.end();return;}
+      const extension=path.split('.').pop();
+      response.setHeader('Content-Type',({html:'text/html',js:'text/javascript',mjs:'text/javascript',css:'text/css',json:'application/json',pdf:'application/pdf',svg:'image/svg+xml',wasm:'application/wasm'})[extension]||'application/octet-stream');
+      response.end(await readFile(join('dist',path)));
+    }catch{response.writeHead(404);response.end();}
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const context=await browser.newContext();
+  try{
+    const page=await context.newPage();await page.goto(`${base}/warmup`);await page.waitForFunction(()=>window.legacyReader===true);
+    await page.goto(base);await page.locator('.book-title').first().waitFor();
+    await page.locator('#search-input').fill('08-linux_internals');await page.locator('.book-title').first().click();await readerAt(page,1);
+    assert.equal(await page.locator('#reader-page-summary').textContent(),'1 / 42');
+    await page.locator('#reader-settings-toggle').click();assert.equal(await page.locator('#reader-settings').isVisible(),true);
+    assert.equal(legacyRequests,1,'new HTML never requests the cached compatibility URL');
+    assert.equal(await page.evaluate(()=>performance.getEntriesByType('resource').some(entry=>/app\.[a-f0-9]{16}\.js/.test(entry.name))),true);
+  }finally{await context.close();await new Promise(resolve=>server.close(resolve));}
 });
 
 test('local review: all file formats, UI marking and reset, persistence, fingerprints, original bytes untouched', async () => {

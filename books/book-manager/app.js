@@ -7,12 +7,14 @@ function loadPdfjs() {
   }).catch(error => { pdfjsPromise = null; throw error; });
 }
 
+const SITE_BASE = new URL('../../', import.meta.url);
 const $ = (selector) => document.querySelector(selector);
 const state = {
   localMode: false, reviews: {}, reviewFilter: 'all',
   books: [], view: 'all', category: '', topic: '', type: '', query: '', sort: 'name', layout: 'grid',
   favorites: readStore('book-library-favorites', []), recent: readStore('book-library-recent', {}),
   reader: null, pdf: null, loadingTask: null, renderTask: null, page: 1, zoom: 1, generation: 0, renderSerial: 0, busy: false,
+  openRequest: 0, libraryUrl: new URL(location.href).href, shareUrl: '',
   fit: 'page', trim: 0, columns: 1, column: 0, cropCache: new Map(),
 };
 
@@ -26,6 +28,46 @@ function saveStore(key, value) { try { localStorage.setItem(key, JSON.stringify(
 function niceName(value) { return value.replace(/^\d+(?:\.\d+)?_/, '').replaceAll('_', ' '); }
 function sizeLabel(bytes) { return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`; }
 function fileUrl(book) { return new URL(`../${book.path.split('/').map(encodeURIComponent).join('/')}`, import.meta.url).href; }
+function resourceUrl(book, page) {
+  const url = new URL(`read/${encodeURIComponent(book.id)}/`, SITE_BASE);
+  if (page !== undefined) url.searchParams.set('page', String(page));
+  return url;
+}
+function routeId() {
+  const relative = location.pathname.slice(SITE_BASE.pathname.length);
+  const match = /^read\/([^/]+)\/(?:index\.html)?$/.exec(relative);
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]); } catch { return ''; }
+}
+function requestedPage() {
+  const value = new URL(location.href).searchParams.get('page');
+  if (value === null) return undefined;
+  return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Math.max(1, Number(value)) : 1;
+}
+function resourceMessage(title, message, book = null) {
+  $('#resource-error').hidden = false;
+  $('#resource-error-title').textContent = title;
+  $('#resource-error-text').textContent = message;
+  $('#resource-original').hidden = !book;
+  if (book) $('#resource-original').href = fileUrl(book);
+}
+async function restoreRoute() {
+  const id = routeId();
+  if (id !== null) {
+    const book = state.books.find(book => book.id === id);
+    if (book) await openBook(book, {page:requestedPage(), historyMode:'none'});
+    else {
+      await closeReader({navigate:false});
+      document.title = '资源已不可用 · 灰库';
+      resourceMessage('资源已不可用', '此链接对应的资源不存在或已移除，请返回灰库查找其他资料。');
+    }
+  } else {
+    await closeReader({navigate:false});
+    $('#resource-error').hidden = true;
+    document.title = state.localMode ? '本地整理 · 灰库' : '灰库 · Fan Feilong';
+  }
+}
+
 function titleForView() { return state.category ? niceName(state.category) : state.view === 'recent' ? '最近阅读' : state.view === 'favorites' ? '我的收藏' : '全部书籍'; }
 function notify(message) { const toast = $('#toast'); toast.textContent = message; toast.hidden = false; clearTimeout(notify.timer); notify.timer = setTimeout(() => toast.hidden = true, 3000); }
 
@@ -130,7 +172,6 @@ function render() {
   $('#page-title').textContent = title;
   $('#breadcrumb-current').textContent = title;
   $('#section-title').textContent = state.category ? '分类书目' : state.view === 'all' ? '馆藏目录' : title;
-  $('#page-description').textContent = state.category ? '按主题查找与阅读这一领域的资料。' : state.view === 'recent' ? '接着上次的进度继续读。' : state.view === 'favorites' ? '你标记过的书籍都在这里。' : '整理知识，从下一本开始。';
   const books = filteredBooks();
   $('#result-description').textContent = state.category ? `${niceName(state.category)} · 书籍资料` : '浏览书籍资料';
   $('#results-count').textContent = `显示 ${books.length} 本书籍`;
@@ -159,6 +200,7 @@ function remember(book, page = 1) {
 
 function readerFeedback(message, busy = true) {
   state.busy = busy;
+  $('#reader-share').disabled = busy || !state.pdf || !state.shareUrl;
   $('#reader-scroll').setAttribute('aria-busy', String(busy));
   $('#reader-loading').hidden = !message;
   $('#reader-loading-text').textContent = message;
@@ -175,9 +217,20 @@ function hideReaderSettings() {
   $('#reader-settings-toggle').setAttribute('aria-expanded', 'false');
 }
 
-async function openBook(book) {
-  if (book.extension !== 'pdf') { remember(book); render(); window.open(fileUrl(book), '_blank', 'noopener'); return; }
-  await closeReader();
+async function openBook(book, {page: sharedPage, historyMode = 'push'} = {}) {
+  const opening = ++state.openRequest;
+  if (routeId() === null) state.libraryUrl = location.href;
+  await closeReader({navigate:false, cancelOpen:false});
+  if (opening !== state.openRequest) return;
+  $('#resource-error').hidden = true;
+  state.shareUrl = ''; $('#reader-share-panel').hidden = true; $('#reader-share-status').textContent = '';
+  if (historyMode === 'push') history.pushState({libraryReturn:state.libraryUrl}, '', resourceUrl(book));
+  document.title = `${book.name} · 灰库`;
+  if (book.extension !== 'pdf') {
+    remember(book); render();
+    resourceMessage(book.name, '此格式请打开原文件阅读。', book);
+    return;
+  }
   const generation = ++state.generation;
   state.reader = book;
   hideReaderSettings();
@@ -218,7 +271,7 @@ async function openBook(book) {
     const pdf = await state.loadingTask.promise;
     if (generation !== state.generation) return;
     state.pdf = pdf;
-    state.page = Math.min(Math.max(state.recent[book.path]?.page || 1, 1), pdf.numPages);
+    state.page = Math.min(Math.max(sharedPage ?? state.recent[book.path]?.page ?? 1, 1), pdf.numPages);
     $('#page-count').textContent = pdf.numPages;
     $('#page-input').max = pdf.numPages;
     for (const id of ['page-input', 'zoom-in', 'zoom-out']) $(`#${id}`).disabled = false;
@@ -334,6 +387,9 @@ async function renderPage(anchor = null) {
       const rect = display.getBoundingClientRect();
       surface.scrollBy(rect.left + anchor.x * rect.width - anchor.clientX, rect.top + anchor.y * rect.height - anchor.clientY);
     }
+    state.shareUrl = resourceUrl(state.reader, pageNumber).href;
+    $('#reader-share-link').value = state.shareUrl;
+    history.replaceState({...history.state, libraryReturn:state.libraryUrl}, '', state.shareUrl);
     readerFeedback('', false);
     $('#reader-status').textContent = `第 ${pageNumber} 页${state.columns === 2 ? (state.column === 0 ? ' · 左栏' : ' · 右栏') : ''}`;
   } catch (error) {
@@ -360,15 +416,48 @@ function stepReading(direction) {
   goToPage(Math.floor(position / state.columns) + 1, position % state.columns);
 }
 
-async function closeReader() {
+async function closeReader({navigate = true, cancelOpen = true} = {}) {
   hideReaderSettings();
-  state.generation++;
-  state.renderSerial++;
+  if (cancelOpen) state.openRequest++;
+  state.generation++; state.renderSerial++;
   if (state.renderTask) { state.renderTask.cancel(); state.renderTask = null; }
-  if (state.loadingTask) { try { await state.loadingTask.destroy(); } catch {} state.loadingTask = null; }
-  state.pdf = null; state.reader = null;
+  const loadingTask = state.loadingTask; state.loadingTask = null;
+  state.pdf = null; state.reader = null; state.shareUrl = '';
+  clearTimeout(shareTimer);
+  $('#reader-share-panel').hidden = true; $('#reader-share-status').textContent = '';
   readerFeedback('', false);
   if ($('#reader').open) $('#reader').close();
+  if (navigate && routeId() !== null) {
+    const candidate = history.state?.libraryReturn || state.libraryUrl;
+    const target = new URL(candidate, SITE_BASE);
+    history.replaceState({}, '', target.origin === location.origin && !target.pathname.includes('/read/') ? target : SITE_BASE);
+    document.title = state.localMode ? '本地整理 · 灰库' : '灰库 · Fan Feilong';
+  }
+  if (loadingTask) { try { await loadingTask.destroy(); } catch {} }
+}
+
+let shareTimer, lastShareMessage = '';
+async function copyReadingLink() {
+  if (state.busy || !state.shareUrl) return;
+  const url = state.shareUrl, page = state.page;
+  clearTimeout(shareTimer);
+  $('#reader-share-panel').hidden = true;
+  let message;
+  try {
+    await navigator.clipboard.writeText(url);
+    message = `已复制第 ${page} 页阅读链接`;
+  } catch {
+    if (!state.reader || state.shareUrl !== url) return;
+    message = '无法自动复制，请手动复制阅读链接';
+    $('#reader-share-panel').hidden = false;
+    $('#reader-share-link').value = url;
+    $('#reader-share-link').focus(); $('#reader-share-link').select();
+  }
+  if (!state.reader || state.shareUrl !== url) return;
+  if (message === lastShareMessage) message += '\u00a0';
+  lastShareMessage = message;
+  $('#reader-share-status').textContent = message;
+  shareTimer = setTimeout(() => { $('#reader-share-status').textContent = ''; }, 3000);
 }
 
 function bindReaderGestures() {
@@ -510,6 +599,13 @@ function bindReaderGestures() {
 
 function bindEvents() {
   bindReaderGestures();
+  if ('CommandEvent' in window) {
+    document.addEventListener('command', event => {
+      if (event.command === '--copy' && event.source === $('#reader-share')) copyReadingLink();
+    }, true);
+  } else $('#reader-share').addEventListener('click', copyReadingLink);
+  $('#reader-share-done').addEventListener('click', () => { $('#reader-share-panel').hidden = true; $('#reader-share').focus(); });
+  window.addEventListener('popstate', () => { if (state.books.length) restoreRoute(); });
   const settings = $('#reader-settings'), settingsToggle = $('#reader-settings-toggle');
   if (typeof settings.showPopover === 'function') {
     // Native popovers keep the PDF layout stable while settings are open.
@@ -568,7 +664,9 @@ function bindEvents() {
 async function init() {
   bindEvents();
   try {
-    const response = await fetch(new URL('./books.json', import.meta.url));
+    const catalogUrl = new URL('./books.json', import.meta.url);
+    catalogUrl.searchParams.set('v', new URL(import.meta.url).pathname.split('/').pop());
+    const response = await fetch(catalogUrl);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const catalog = await response.json();
     state.books = catalog.books;
@@ -577,6 +675,8 @@ async function init() {
     state.category = new URLSearchParams(location.search).get('category') || '';
     if (!state.books.some(book => book.category === state.category)) state.category = '';
     renderSidebar(); setView('all', state.category);
+    if (routeId() !== null) state.libraryUrl = SITE_BASE.href;
+    await restoreRoute();
   } catch (error) {
     $('#results-count').textContent = '无法读取灰库';
     $('#empty-state').hidden = false;

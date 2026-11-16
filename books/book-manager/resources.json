@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "resources": [
+    {
+      "id": "blockchain",
+      "path": "../blockchain.pdf"
+    },
+    {
+      "id": "chrome-comic",
+      "path": "../chromecomic.pdf"
+    },
+    {
+      "id": "algebrahandbook-ee5c65d0",
+      "path": "00_未分类/AlgebraHandbook.pdf"
+    },
+    {
+      "id": "hidden-markov-models-3f51b5c9",
+      "path": "00_未分类/Hidden Markov Models.pdf"
+    },
+    {
+      "id": "the-little-book-of-deep-learning-3035c0c9",
+      "path": "00_未分类/The Little Book of Deep Learning.pdf"
+    },
+    {
+      "id": "assembly64-7841348c",
+      "path": "01_计算机科学/01.03_编译器与语言实现/assembly64.pdf"
+    },
+    {
+      "id": "c-interfaces",
+      "path": "01_计算机科学/01.04_C_Cpp与系统编程/[C语言接口与实现：创建可重用软件的技术].(Hanson).郭旭.扫描版.pdf"
+    },
+    {
+      "id": "linux-internals",
+      "path": "01_计算机科学/01.05_操作系统与底层/08-linux_internals.pdf"
+    },
+    {
+      "id": "consistency-models-in-modern-distributed-systems-an-app-7d311923",
+      "path": "01_计算机科学/01.06_并发与分布式系统/Consistency models in modern distributed systems. An approach to Eventual Consistency.pdf"
+    },
+    {
+      "id": "a-thought-experiment-using-the-ecs-pattern-outside-of-g-604b0dd5",
+      "path": "01_计算机科学/01.09_软件工程与架构/A Thought Experiment_ Using the ECS Pattern Outside of Game Engines · Michael-F-Bryan.pdf"
+    },
+    {
+      "id": "git-internals-2a9010b2",
+      "path": "01_计算机科学/01.10_版本控制/Git Internals.pdf"
+    },
+    {
+      "id": "dive-into-dl-pytorch-47b075c1",
+      "path": "02_人工智能与数据科学/02.01_深度学习基础/Dive-into-DL-PyTorch.pdf"
+    },
+    {
+      "id": "svm-0b925ec2",
+      "path": "02_人工智能与数据科学/02.02_机器学习算法/SVM 保姆级教程.pdf"
+    },
+    {
+      "id": "a-comprehensive-survey-of-ai-generated-content-aigc-a-h-6b3410b8",
+      "path": "02_人工智能与数据科学/02.04_Transformer_BERT_GPT/A Comprehensive Survey of AI-Generated Content (AIGC)-A History of Generative AI from GAN to ChatGPT.pdf"
+    },
+    {
+      "id": "a-survey-of-transformers-3ee4465e",
+      "path": "02_人工智能与数据科学/02.04_Transformer_BERT_GPT/A Survey of Transformers.pdf"
+    },
+    {
+      "id": "algorithms-4th-edition-robert-sedgewick-and-kevin-wayne-be832762",
+      "path": "02_人工智能与数据科学/02.04_Transformer_BERT_GPT/Algorithms, 4th edition - Robert Sedgewick and Kevin Wayne.pdf"
+    },
+    {
+      "id": "chatgpt-10a1cc31",
+      "path": "02_人工智能与数据科学/02.04_Transformer_BERT_GPT/ChatGPT的前世今生.pdf"
+    },
+    {
+      "id": "book-9bfd8266",
+      "path": "02_人工智能与数据科学/02.06_计算机视觉与图像处理/数字图像处理_第三版_冈萨雷斯.pdf"
+    },
+    {
+      "id": "book-e103c092",
+      "path": "03_数学/03.01_数学基础与工具/数学手册.pdf"
+    },
+    {
+      "id": "latex-cf452d40",
+      "path": "03_数学/03.01_数学基础与工具/现代 LaTEX 入门讲座.pdf"
+    },
+    {
+      "id": "probability",
+      "path": "03_数学/03.03_概率统计/概率论.pdf"
+    },
+    {
+      "id": "book-39e94198",
+      "path": "03_数学/03.04_离散数学与图论/应用离散结构.pdf"
+    },
+    {
+      "id": "a-introduction-to-mathematical-cryptography-4cdf3d04",
+      "path": "04_密码学_区块链_安全/04.01_密码学基础/A Introduction to Mathematical Cryptography.pdf"
+    },
+    {
+      "id": "a-coder-s-guide-to-elliptic-curve-cryptography-aa51fbf9",
+      "path": "04_密码学_区块链_安全/04.02_椭圆曲线与配对/A Coder’s Guide to Elliptic Curve Cryptography.pdf"
+    },
+    {
+      "id": "an-introduction-to-the-theory-of-elliptic-curves-f6f0f2bb",
+      "path": "04_密码学_区块链_安全/04.02_椭圆曲线与配对/An Introduction to the Theory of Elliptic Curves.pdf"
+    },
+    {
+      "id": "bilinear-pairings-in-cryptography-9de7821d",
+      "path": "04_密码学_区块链_安全/04.02_椭圆曲线与配对/Bilinear Pairings in Cryptography.pdf"
+    },
+    {
+      "id": "elliptic-curve-cryptography-and-the-weil-pairing-1729de1a",
+      "path": "04_密码学_区块链_安全/04.02_椭圆曲线与配对/Elliptic curve cryptography and the Weil pairing.pdf"
+    },
+    {
+      "id": "elliptic-curves-number-theory-and-cryptography-2n-d9ab8b01",
+      "path": "04_密码学_区块链_安全/04.02_椭圆曲线与配对/Elliptic Curves Number Theory And Cryptography 2n.pdf"
+    },
+    {
+      "id": "exploring-elliptic-curve-pairings-vitalik-buterin-mediu-68583bff",
+      "path": "04_密码学_区块链_安全/04.02_椭圆曲线与配对/Exploring Elliptic Curve Pairings – Vitalik Buterin – Medium.pdf"
+    },
+    {
+      "id": "guide-to-elliptic-curve-cryptography-005aa8b6",
+      "path": "04_密码学_区块链_安全/04.02_椭圆曲线与配对/Guide to Elliptic Curve Cryptography.pdf"
+    },
+    {
+      "id": "zero-knowledge-proofs-an-illustrated-primer-a-few-thoug-d2300fe6",
+      "path": "04_密码学_区块链_安全/04.03_零知识证明/Zero Knowledge Proofs_ An illustrated primer – A Few Thoughts on Cryptographic Engineering.pdf"
+    },
+    {
+      "id": "zero-knowledge-proofs-an-illustrated-primer-part-2-a-fe-00b8d81a",
+      "path": "04_密码学_区块链_安全/04.03_零知识证明/Zero Knowledge Proofs_ An illustrated primer, Part 2 – A Few Thoughts on Cryptographic Engineering.pdf"
+    },
+    {
+      "id": "zk-snarks-under-the-hood-vitalik-buterin-medium-9698491c",
+      "path": "04_密码学_区块链_安全/04.03_零知识证明/Zk-SNARKs_ Under the Hood – Vitalik Buterin – Medium.pdf"
+    },
+    {
+      "id": "the-logic-of-scientific-discovery-8c37ea2c",
+      "path": "05_科学_认知_教育_语言/05.01_科学哲学/The Logic of Scientific Discovery.pdf"
+    },
+    {
+      "id": "on-regularinvesting-cn-8a656f92",
+      "path": "06_商业_财富_社会/06.01_财富与投资/on-regularinvesting-cn.pdf"
+    },
+    {
+      "id": "the-invention-of-money-the-new-yorker-2c71629b",
+      "path": "06_商业_财富_社会/06.01_财富与投资/The Invention of Money | The New Yorker.pdf"
+    },
+    {
+      "id": "2021-e2c2884f6b6f98de95814f6f2c0444a3-anna-s-archive-1-ec909a7b",
+      "path": "06_商业_财富_社会/06.01_财富与投资/金钱的属性_一个富豪的财富私房课(白手起家的千亿富豪的财富积累方法 -- 【韩】金胜镐 -- 2021 -- 浙江人民出版社 -- e2c2884f6b6f98de95814f6f2c0444a3 -- Anna’s Archive(1).pdf"
+    }
+  ]
+}
