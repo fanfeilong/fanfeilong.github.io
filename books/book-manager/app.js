@@ -168,11 +168,20 @@ function readerFeedback(message, busy = true) {
 // Allow the loading state to paint before PDF.js starts CPU-heavy work.
 const paintFeedback = () => new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
 
+function hideReaderSettings() {
+  const panel = $('#reader-settings');
+  if (typeof panel.hidePopover === 'function') panel.hidePopover();
+  else panel.hidden = true;
+  $('#reader-settings-toggle').setAttribute('aria-expanded', 'false');
+}
+
 async function openBook(book) {
   if (book.extension !== 'pdf') { remember(book); render(); window.open(fileUrl(book), '_blank', 'noopener'); return; }
   await closeReader();
   const generation = ++state.generation;
   state.reader = book;
+  hideReaderSettings();
+  $('#reader-page-summary').textContent = '– / –';
   $('#reader').showModal();
   $('#reader-title').textContent = book.name;
   $('#reader-topic').textContent = `${niceName(book.category)} / ${niceName(book.topic)}`;
@@ -277,6 +286,7 @@ async function renderPage(anchor = null) {
   const pageNumber = state.page;
   if (state.renderTask) { state.renderTask.cancel(); state.renderTask = null; }
   $('#page-input').value = pageNumber;
+  $('#reader-page-summary').textContent = `${pageNumber} / ${state.pdf.numPages}`;
   $('#reader-columns').options[1].textContent = `双栏 · ${state.column === 0 ? '左栏' : '右栏'}`;
   $('#prev-page').disabled = pageNumber <= 1 && state.column === 0;
   $('#next-page').disabled = pageNumber >= state.pdf.numPages && state.column === state.columns - 1;
@@ -351,6 +361,7 @@ function stepReading(direction) {
 }
 
 async function closeReader() {
+  hideReaderSettings();
   state.generation++;
   state.renderSerial++;
   if (state.renderTask) { state.renderTask.cancel(); state.renderTask = null; }
@@ -499,6 +510,20 @@ function bindReaderGestures() {
 
 function bindEvents() {
   bindReaderGestures();
+  const settings = $('#reader-settings'), settingsToggle = $('#reader-settings-toggle');
+  if (typeof settings.showPopover === 'function') {
+    // Native popovers keep the PDF layout stable while settings are open.
+    settings.hidden = false;
+    settings.addEventListener('beforetoggle', event => settingsToggle.setAttribute('aria-expanded', String(event.newState === 'open')));
+  } else {
+    // Older browsers still get a working disclosure without a dependency.
+    settings.removeAttribute('popover');
+    settingsToggle.removeAttribute('popovertarget');
+    settingsToggle.addEventListener('click', () => {
+      settings.hidden = !settings.hidden;
+      settingsToggle.setAttribute('aria-expanded', String(!settings.hidden));
+    });
+  }
   document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
   $('#search-input').addEventListener('input', event => { state.query = event.target.value; render(); });
   $('#topic-select').addEventListener('change', event => { state.topic = event.target.value; render(); });

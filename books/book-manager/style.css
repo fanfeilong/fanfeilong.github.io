@@ -38,3 +38,16 @@ progress.loading-spinner::-moz-progress-bar{background:transparent}
 .reader-scroll canvas{flex-shrink:0;transform-origin:0 0}
 .reader-scroll:focus-visible{outline:2px solid #80512a;outline-offset:-3px}
 @media(max-width:480px){.reader-options{gap:4px 8px;padding:5px 8px}.reader-options select,.reader-options button{min-height:36px;font-size:11px;padding:3px 5px}.reader-trim{font-size:11px}.reader-trim input{width:64px}.reader-hint{font-size:10px;padding:5px 8px}}
+
+/* Keep only identity, page count and actions in the permanent reading bar. */
+.reader-actions{align-items:center;flex-shrink:0}
+.reader-page-summary{white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums;color:#405647}
+#reader-settings-toggle{min-width:36px;min-height:36px}
+#reader-settings-toggle[aria-expanded="true"]{background:#e5eee5;border-color:#64816a}
+.reader-settings{position:fixed;inset:64px 8px auto auto;margin:0;padding:0;width:min(700px,calc(100% - 16px));max-height:calc(100dvh - 80px);overflow:auto;border:1px solid #b6c4b9;border-radius:8px;background:#f8faf8;color:#405647;box-shadow:0 8px 28px #24322930;z-index:2}
+.reader-settings .reader-toolbar{position:relative;min-height:47px;height:auto;padding:7px}
+.reader-settings #reader-status{position:static}
+@media(max-width:480px){.reader-actions{gap:5px}.reader-page-summary{font-size:11px}#reader-settings-toggle{min-width:36px}.reader-settings .reader-toolbar{gap:10px}}
+@media(pointer:coarse){#reader-settings-toggle{min-width:44px;min-height:44px}}
+
+@media(max-height:500px) and (orientation:landscape){.reader-header{height:44px}.reader-settings{top:48px;max-height:calc(100dvh - 56px)}}

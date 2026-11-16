@@ -104,13 +104,14 @@ test('embedded PDF: render, page navigation, zoom, Escape and focus restoration'
   await page.locator('#search-input').fill(sample.name);
   const opener=page.locator('.book-title').filter({hasText:sample.name}).first();
   await opener.click();
+  await page.locator('#reader-settings-toggle').click();
   await page.locator('#reader-status').filter({hasText:'第 1 页'}).waitFor({timeout:30000});
   const total=Number(await page.locator('#page-count').textContent()); assert.ok(total>1);
   await page.locator('#next-page').click(); await page.locator('#reader-status').filter({hasText:'第 2 页'}).waitFor();
   await page.locator('#zoom-in').click(); assert.equal(await page.locator('#zoom-label').textContent(),'120%');
   await page.keyboard.press('Escape'); await page.waitForFunction(()=>!document.querySelector('#reader').open);
   assert.equal(await opener.evaluate(el=>document.activeElement===el),true);
-  await opener.click(); await page.locator('#reader-status').filter({hasText:'第 2 页'}).waitFor();
+  await opener.click(); await page.locator('#reader-settings-toggle').click(); await page.locator('#reader-status').filter({hasText:'第 2 页'}).waitFor();
   await page.locator('#reader-close').click(); await page.close();
 });
 
@@ -126,6 +127,7 @@ test('PDF loading feedback, mouse/touch gestures, boundaries and long-page panni
   await page.locator('#search-input').fill(sample.name);
   await page.locator('.book-title').filter({hasText:sample.name}).first().click();
   await page.locator('#reader-loading').waitFor({state:'visible'});
+  await page.locator('#reader-settings-toggle').click();
   assert.equal(await page.locator('#reader-scroll').getAttribute('aria-busy'),'true');
   assert.equal(await page.locator('#reader-loading progress').isVisible(),true);
   assert.equal(await page.locator('#next-page').isDisabled(),true);
@@ -215,6 +217,7 @@ async function openReadingFixture(page) {
   await page.locator('#search-input').fill(sample.name);
   await page.locator('.book-title').filter({hasText:sample.name}).first().click();
   await readerAt(page,1);
+  await page.locator('#reader-settings-toggle').click();
 }
 async function readerAt(page,number,suffix='') {
   await page.waitForFunction(({number,suffix})=>document.querySelector('#reader-status').textContent===`第 ${number} 页${suffix}` && document.querySelector('#reader-scroll').getAttribute('aria-busy')==='false', {number,suffix});
@@ -223,6 +226,45 @@ async function changeReader(page, action) {
   await action();
   await page.waitForFunction(()=>document.querySelector('#reader-scroll').getAttribute('aria-busy')==='false');
 }
+
+test('reading settings: hidden by default, persistent page count, stable viewport and keyboard toggle', async () => {
+  for (const fallback of [false,true]) {
+    const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true});
+    if (fallback) await context.addInitScript(()=>{
+      for(const name of ['showPopover','hidePopover','togglePopover']) Object.defineProperty(HTMLElement.prototype,name,{value:undefined,configurable:true});
+    });
+    const page=await context.newPage();
+    await openReadingFixture(page); // The helper expands settings for control tests.
+    const toggle=page.locator('#reader-settings-toggle'), panel=page.locator('#reader-settings');
+    await toggle.click();
+    assert.equal(await toggle.getAttribute('aria-expanded'),'false');
+    assert.equal(await panel.isVisible(),false);
+    assert.equal(await page.locator('#reader-page-summary').isVisible(),true);
+    assert.equal(await page.locator('#reader-page-summary').textContent(),'1 / 3');
+    const area=await page.locator('#reader-scroll').boundingBox();
+    assert.ok(area.height>=780,'only the compact header occupies reading space');
+    await toggle.focus();await page.keyboard.press('Enter');
+    assert.equal(await panel.isVisible(),true);
+    assert.equal(await toggle.getAttribute('aria-expanded'),'true');
+    assert.deepEqual(await page.locator('#reader-scroll').boundingBox(),area,'settings overlay preserves the PDF viewport');
+    await page.locator('#next-page').click();await readerAt(page,2);
+    assert.equal(await page.locator('#reader-page-summary').textContent(),'2 / 3');
+    await toggle.focus();await page.keyboard.press('Space');
+    assert.equal(await panel.isVisible(),false);
+    await page.locator('#reader-scroll').hover();await page.mouse.wheel(120,0);await readerAt(page,3);
+    assert.equal(await page.locator('#reader-page-summary').textContent(),'3 / 3');
+    await page.screenshot({path:`artifacts/pdf-reading-settings-${fallback?'fallback':'native'}.png`});
+    const axe=await new AxeBuilder({page}).analyze();assert.deepEqual(axe.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)})),[]);
+    // Reopening always starts with settings collapsed, retaining reading progress.
+    await toggle.click();await page.locator('#reader-close').click();
+    await page.locator('.book-title').first().click();await readerAt(page,3);
+    assert.equal(await panel.isVisible(),false);assert.equal(await toggle.getAttribute('aria-expanded'),'false');
+    await page.setViewportSize({width:320,height:844});await page.waitForTimeout(260);await readerAt(page,3);
+    assert.equal(await page.locator('#reader-page-summary').isVisible(),true);
+    assert.equal(await page.evaluate(()=>document.querySelector('#reader').scrollWidth<=innerWidth),true);
+    await context.close();
+  }
+});
 
 test('mobile PDF: content fit, reversible cropping, anchored double-tap/pinch zoom and column reading', async () => {
   const context=await browser.newContext({viewport:{width:390,height:844},hasTouch:true});
@@ -240,6 +282,7 @@ test('mobile PDF: content fit, reversible cropping, anchored double-tap/pinch zo
   assert.ok(await page.locator('#pdf-canvas').evaluate(el=>el.clientHeight)>pageHeight*1.2);
   await changeReader(page,()=>page.locator('#reader-reset').click());
   assert.equal(await page.locator('#pdf-canvas').evaluate(el=>el.clientHeight),pageHeight);
+  await page.locator('#reader-settings-toggle').click();
   const session=await context.newCDPSession(page);
   const rect=await page.locator('#pdf-canvas').boundingBox();
   const x=rect.x+rect.width*.6, y=rect.y+rect.height*.35;
@@ -249,13 +292,16 @@ test('mobile PDF: content fit, reversible cropping, anchored double-tap/pinch zo
   const zoomed=await page.locator('#pdf-canvas').boundingBox();
   assert.ok(Math.abs((x-zoomed.x)/zoomed.width-.6)<.035, 'double-tap keeps the tapped horizontal content position');
   assert.ok(Math.abs((y-zoomed.y)/zoomed.height-.35)<.035, 'double-tap keeps the tapped vertical content position');
+  await page.locator('#reader-settings-toggle').click();
   await changeReader(page,()=>page.locator('#reader-reset').click());
+  await page.locator('#reader-settings-toggle').click();
   const pinchY=rect.y+180;
   await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:145,y:pinchY},{x:245,y:pinchY}]});
   for(let i=1;i<=5;i++) await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:145-i*8,y:pinchY},{x:245+i*8,y:pinchY}]});
   await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
   await page.waitForFunction(()=>document.querySelector('#zoom-label').textContent==='180%');await readerAt(page,1);
   assert.equal(await page.locator('#page-input').inputValue(),'1');
+  await page.locator('#reader-settings-toggle').click();
   await changeReader(page,()=>page.locator('#reader-reset').click());
   await page.locator('#reader-columns').selectOption('2');await readerAt(page,1,' · 左栏');
   assert.equal(await page.locator('#prev-page').isDisabled(),true);
