@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "name": "local-book-manager",
+  "version": "1.0.0",
+  "description": "Local book library with a PDF.js reader",
+  "dependencies": {
+    "pdfjs-dist": "6.4.299"
+  }
+}

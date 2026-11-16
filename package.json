@@ -1,0 +1,22 @@
+{
+  "name": "fanfeilong-home",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "python3 scripts/build.py",
+    "preview": "python3 -m http.server 4173 --bind 127.0.0.1 --directory dist",
+    "test": "node --test tests/site.test.mjs",
+    "local": "npm run build && python3 books/book-manager/server.py"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.4.299"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "@axe-core/playwright": "^4.11.0"
+  }
+}
