@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import datetime
+import math
 import threading
 import time
 import json
@@ -25,6 +27,54 @@ def in_root(path: Path) -> bool:
     return path == ROOT or ROOT in path.parents
 
 
+COURSE_SECTIONS = ('课程概览', '学习目标', '课程安排', '考核与作业', '学习资源', '信息缺口', '来源')
+
+
+def parse_course(text):
+    """Parse the JSON-compatible YAML front matter used by course/v1."""
+    match = re.fullmatch(r'---\r?\n(.*?)\r?\n---(?:\r?\n|$)(.*)', text.lstrip('\ufeff'), re.S)
+    if not match:
+        raise ValueError('Course Markdown needs JSON front matter between --- lines')
+    metadata = json.loads(match.group(1))
+    required = ('schema_version', 'id', 'title', 'source_url', 'summary', 'last_checked')
+    if not isinstance(metadata, dict) or any(not isinstance(metadata.get(key), str) or not metadata[key].strip() for key in required):
+        raise ValueError('Course requires non-empty schema_version, id, title, source_url, summary and last_checked')
+    if metadata['schema_version'] != 'course/v1' or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,79}', metadata['id']):
+        raise ValueError('Unsupported course schema or invalid course id')
+    optional_strings = ('provider', 'title_zh', 'term', 'language', 'delivery', 'location', 'schedule', 'credit_unit', 'prerequisites', 'enrollment', 'cost', 'certificate', 'license')
+    for key in optional_strings:
+        if key not in metadata or (metadata[key] is not None and not isinstance(metadata[key], str)):
+            raise ValueError(f'Course field {key} must be a string or null')
+    for key in ('course_codes', 'instructors', 'topics'):
+        if not isinstance(metadata.get(key), list) or any(not isinstance(item, str) or not item.strip() for item in metadata[key]):
+            raise ValueError(f'Course field {key} must be an array of strings')
+    for key in ('year', 'credits', 'weekly_hours'):
+        value = metadata.get(key)
+        if key not in metadata or (value is not None and (type(value) not in (int, float) or not math.isfinite(value) or value < 0)):
+            raise ValueError(f'Course field {key} must be a non-negative number or null')
+    if metadata['year'] is not None and (type(metadata['year']) is not int or not 1900 <= metadata['year'] <= 2100):
+        raise ValueError('Course year must be an integer in 1900..2100 or null')
+    def valid_url(url):
+        return isinstance(url, str) and urlsplit(url).scheme in ('https', 'http') and bool(urlsplit(url).hostname)
+    if not valid_url(metadata['source_url']):
+        raise ValueError('Course source_url must be an HTTP(S) URL')
+    datetime.date.fromisoformat(metadata['last_checked'])
+    sources = metadata.get('sources')
+    if not isinstance(sources, list) or not sources:
+        raise ValueError('Course sources must include at least the course homepage')
+    for source in sources:
+        if not isinstance(source, dict) or not isinstance(source.get('title'), str) or not source['title'].strip() or not valid_url(source.get('url')):
+            raise ValueError('Course sources require title, HTTP(S) url and checked_at')
+        datetime.date.fromisoformat(source['checked_at'])
+    if metadata['source_url'].rstrip('/') not in {source['url'].rstrip('/') for source in sources}:
+        raise ValueError('Course sources must cite source_url')
+    body = match.group(2).strip()
+    for section in COURSE_SECTIONS:
+        if not re.search(r'^## ' + re.escape(section) + r'\s*$', body, re.M):
+            raise ValueError(f'Course body is missing section: {section}')
+    return metadata, body
+
+
 def books():
     result = []
     for path in ROOT.rglob("*"):
@@ -43,6 +93,11 @@ def books():
             "size": stat.st_size,
             "modified": int(stat.st_mtime),
         })
+        if relative.parts[0] == '07_课程' and path.suffix.lower() == '.md':
+            metadata, _ = parse_course(path.read_text(encoding='utf-8'))
+            result[-1]['course'] = metadata
+            title = metadata['title_zh'] or metadata['title']
+            result[-1]['name'] = f"{title} · {metadata['year']}" if metadata['year'] else title
     return sorted(result, key=lambda item: item["path"].casefold())
 
 
@@ -219,6 +274,9 @@ def catalog():
                            "extension": path.suffix.lower()[1:], "category": "历史资料",
                            "topic": "旧站收藏", "size": stat.st_size, "modified": int(stat.st_mtime)})
     ids = {entry["path"]: entry["id"] for entry in resource_entries()}
+    for book in result:
+        if book.get('course') and book['path'] in ids and book['course']['id'] != ids[book['path']]:
+            raise ValueError(f"Course id differs from resource registry: {book['path']}")
     return sorted(({**book, "id": ids.get(book["path"])} for book in result), key=lambda item: item["path"].casefold())
 
 

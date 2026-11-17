@@ -14,7 +14,7 @@ const state = {
   books: [], view: 'all', category: '', topic: '', type: '', query: '', sort: 'name', layout: 'grid',
   favorites: readStore('book-library-favorites', []), recent: readStore('book-library-recent', {}),
   reader: null, pdf: null, loadingTask: null, renderTask: null, page: 1, zoom: 1, generation: 0, renderSerial: 0, busy: false,
-  openRequest: 0, libraryUrl: new URL(location.href).href, shareUrl: '',
+  articleOpen: false, queuedStep: 0, openRequest: 0, libraryUrl: new URL(location.href).href, shareUrl: '',
   fit: 'page', trim: 0, columns: 1, column: 0, cropCache: new Map(),
 };
 
@@ -63,6 +63,7 @@ async function restoreRoute() {
     }
   } else {
     await closeReader({navigate:false});
+    if ($('#resource-article')) { state.articleOpen = false; $('#resource-article').hidden = true; document.querySelector('.library-panel').hidden = false; }
     $('#resource-error').hidden = true;
     document.title = state.localMode ? '本地整理 · 灰库' : '灰库 · Fan Feilong';
   }
@@ -72,6 +73,11 @@ function titleForView() { return state.category ? niceName(state.category) : sta
 function notify(message) { const toast = $('#toast'); toast.textContent = message; toast.hidden = false; clearTimeout(notify.timer); notify.timer = setTimeout(() => toast.hidden = true, 3000); }
 
 function setView(view, category = '') {
+  if (state.books.length && $('#resource-article') && !$('#resource-article').hidden && state.articleOpen) {
+    state.articleOpen = false; $('#resource-article').hidden = true; document.querySelector('.library-panel').hidden = false;
+    const home = new URL(SITE_BASE); if (category) home.searchParams.set('category', category);
+    history.pushState({}, '', home); document.title = state.localMode ? '本地整理 · 灰库' : '灰库 · Fan Feilong';
+  }
   state.view = view; state.category = category; state.topic = '';
   $('#topic-select').value = '';
   document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('active', !category && button.dataset.view === view));
@@ -128,7 +134,7 @@ function filteredBooks() {
     if (state.type && state.type !== 'other' && book.extension !== state.type) return false;
     if (state.type === 'other' && book.extension === 'pdf') return false;
     if (state.localMode && state.reviewFilter !== 'all' && reviewChoice(book) !== state.reviewFilter) return false;
-    return !q || `${book.name} ${book.category} ${book.topic} ${book.path}`.toLocaleLowerCase().includes(q);
+    return !q || `${book.name} ${book.category} ${book.topic} ${book.path} ${book.course ? [book.course.title, book.course.provider, ...book.course.course_codes, ...book.course.instructors, ...book.course.topics].join(' ') : ''}`.toLocaleLowerCase().includes(q);
   });
   result.sort((a,b) => {
     if (state.view === 'recent') return state.recent[b.path]?.at - state.recent[a.path]?.at;
@@ -144,7 +150,7 @@ function createCard(book) {
   card.className = 'book-card';
   const cover = document.createElement('div');
   cover.className = `book-cover type-${Math.max(0, parseInt(book.category, 10) || 0) % 7}`;
-  const type = document.createElement('span'); type.className = 'cover-type'; type.textContent = book.extension.toUpperCase();
+  const type = document.createElement('span'); type.className = 'cover-type'; type.textContent = book.course ? '课程' : book.extension.toUpperCase();
   const short = document.createElement('strong'); short.textContent = book.name;
   cover.append(type, short);
   const info = document.createElement('div'); info.className = 'book-info';
@@ -161,7 +167,13 @@ function createCard(book) {
   favorite.setAttribute('aria-pressed', String(state.favorites.includes(book.path)));
   favorite.title = state.favorites.includes(book.path) ? '取消收藏' : '收藏';
   favorite.addEventListener('click', event => { event.stopPropagation(); toggleFavorite(book.path); });
-  bottom.append(format, favorite); info.append(title, topic, bottom); card.append(cover, info);
+  bottom.append(format, favorite); info.append(title, topic);
+  if (book.course) {
+    const detail = document.createElement('p'); detail.className = 'course-summary';
+    detail.textContent = `${book.course.provider || '机构未注明'}${book.course.weekly_hours !== null ? ` · ${book.course.weekly_hours} 小时/周` : ''}`;
+    info.append(detail);
+  }
+  info.append(bottom); card.append(cover, info);
   cover.addEventListener('click', () => title.click());
   if (state.localMode) card.append(createReviewTools(book));
   return card;
@@ -218,6 +230,9 @@ function hideReaderSettings() {
 }
 
 async function openBook(book, {page: sharedPage, historyMode = 'push'} = {}) {
+  if (book.extension === 'md' && (historyMode === 'push' || !$('#resource-article'))) {
+    location.assign(resourceUrl(book)); return;
+  }
   const opening = ++state.openRequest;
   if (routeId() === null) state.libraryUrl = location.href;
   await closeReader({navigate:false, cancelOpen:false});
@@ -226,6 +241,11 @@ async function openBook(book, {page: sharedPage, historyMode = 'push'} = {}) {
   state.shareUrl = ''; $('#reader-share-panel').hidden = true; $('#reader-share-status').textContent = '';
   if (historyMode === 'push') history.pushState({libraryReturn:state.libraryUrl}, '', resourceUrl(book));
   document.title = `${book.name} · 灰库`;
+  if (book.extension === 'md' && $('#resource-article')) {
+    state.articleOpen = false; setView('all', book.category);
+    state.articleOpen = true; $('#resource-article').hidden = false; document.querySelector('.library-panel').hidden = true;
+    remember(book); render(); return;
+  }
   if (book.extension !== 'pdf') {
     remember(book); render();
     resourceMessage(book.name, '此格式请打开原文件阅读。', book);
@@ -296,6 +316,7 @@ function centerAnchor() {
 }
 function setZoom(zoom, anchor = centerAnchor()) {
   if (!state.pdf) return;
+  state.queuedStep = 0;
   state.zoom = Math.max(.5, Math.min(5, zoom));
   renderPage(anchor);
 }
@@ -392,9 +413,11 @@ async function renderPage(anchor = null) {
     history.replaceState({...history.state, libraryReturn:state.libraryUrl}, '', state.shareUrl);
     readerFeedback('', false);
     $('#reader-status').textContent = `第 ${pageNumber} 页${state.columns === 2 ? (state.column === 0 ? ' · 左栏' : ' · 右栏') : ''}`;
+    const queued = state.queuedStep; state.queuedStep = 0;
+    if (queued) stepReading(queued);
   } catch (error) {
     if (error.name !== 'RenderingCancelledException' && generation === state.generation && serial === state.renderSerial) {
-      state.renderTask = null;
+      state.renderTask = null; state.queuedStep = 0;
       readerFeedback(`页面渲染失败：${error.message || error}`, false);
       $('#reader-status').textContent = '渲染失败';
     }
@@ -403,6 +426,7 @@ async function renderPage(anchor = null) {
 
 function goToPage(page, column = 0) {
   if (!state.pdf) return;
+  state.queuedStep = 0;
   const next = Math.min(Math.max(Math.trunc(Number(page)) || 1, 1), state.pdf.numPages);
   if (next === state.page && column === state.column) { $('#page-input').value = next; return; }
   state.page = next; state.column = column; remember(state.reader, next);
@@ -416,13 +440,20 @@ function stepReading(direction) {
   goToPage(Math.floor(position / state.columns) + 1, position % state.columns);
 }
 
+function requestReadingStep(direction) {
+  // Retain only the latest intentional gesture; momentum never adds a backlog.
+  if (!state.pdf) return;
+  if (state.busy) state.queuedStep = direction;
+  else stepReading(direction);
+}
+
 async function closeReader({navigate = true, cancelOpen = true} = {}) {
   hideReaderSettings();
   if (cancelOpen) state.openRequest++;
   state.generation++; state.renderSerial++;
   if (state.renderTask) { state.renderTask.cancel(); state.renderTask = null; }
   const loadingTask = state.loadingTask; state.loadingTask = null;
-  state.pdf = null; state.reader = null; state.shareUrl = '';
+  state.pdf = null; state.reader = null; state.shareUrl = ''; state.queuedStep = 0;
   clearTimeout(shareTimer);
   $('#reader-share-panel').hidden = true; $('#reader-share-status').textContent = '';
   readerFeedback('', false);
@@ -475,10 +506,20 @@ function bindReaderGestures() {
     resetDrag(); points.clear(); pinch = null; lastTap = null;
     clearTimeout(wheelTimer); clearTimeout(zoomTimer); wheel = null; wheelZoom = null; clearPreview();
   };
+  const classifyDrag = (current, dx, dy) => {
+    const axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    if (!current.panned) {
+      current.axis = axis;
+      const delta = axis === 'x' ? dx : dy;
+      const start = axis === 'x' ? current.left : current.top;
+      const max = axis === 'x' ? current.maxX : current.maxY;
+      current.turn = max <= 2 || (delta < 0 ? start >= max - 2 : start <= 2);
+    }
+  };
   const distance = () => { const [a, b] = [...points.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
   const midpoint = () => { const [a, b] = [...points.values()]; return {x:(a.x + b.x) / 2, y:(a.y + b.y) / 2}; };
   surface.addEventListener('pointerdown', event => {
-    if (event.button !== 0 || !state.pdf || state.busy || wheelZoom) return;
+    if (event.button !== 0 || !state.pdf || wheelZoom) return;
     points.set(event.pointerId, {x:event.clientX, y:event.clientY});
     surface.setPointerCapture(event.pointerId);
     if (points.size === 2) {
@@ -490,7 +531,7 @@ function bindReaderGestures() {
     }
     if (points.size !== 1 || !event.isPrimary) return;
     gesture = {
-      id: event.pointerId, x: event.clientX, y: event.clientY,
+      id: event.pointerId, x: event.clientX, y: event.clientY, started:event.timeStamp,
       left: surface.scrollLeft, top: surface.scrollTop,
       maxX: surface.scrollWidth - surface.clientWidth,
       maxY: surface.scrollHeight - surface.clientHeight,
@@ -508,17 +549,13 @@ function bindReaderGestures() {
     }
     if (!gesture || event.pointerId !== gesture.id) return;
     const dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
-    if (!gesture.axis) {
-      if (Math.max(Math.abs(dx), Math.abs(dy)) < 8) return;
-      gesture.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
-      const delta = gesture.axis === 'x' ? dx : dy;
-      const start = gesture.axis === 'x' ? gesture.left : gesture.top;
-      const max = gesture.axis === 'x' ? gesture.maxX : gesture.maxY;
-      // A finger moving left/up advances; panning has priority until the edge.
-      gesture.turn = max <= 2 || (delta < 0 ? start >= max - 2 : start <= 2);
-    }
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 8 && !gesture.axis) return;
+    classifyDrag(gesture, dx, dy);
     surface.classList.add('dragging');
-    if (!gesture.turn) surface.scrollTo(gesture.left - dx, gesture.top - dy);
+    if (!gesture.turn) {
+      surface.scrollTo(gesture.left - dx, gesture.top - dy);
+      if (Math.hypot(surface.scrollLeft - gesture.left, surface.scrollTop - gesture.top) >= 8) gesture.panned = true;
+    }
   });
   surface.addEventListener('pointerup', event => {
     const current = gesture;
@@ -532,7 +569,7 @@ function bindReaderGestures() {
     if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
     if (!current || event.pointerId !== current.id) return;
     resetDrag();
-    if (state.busy || current.generation !== state.generation || current.serial !== state.renderSerial) return;
+    if (current.generation !== state.generation || current.serial !== state.renderSerial) return;
     const dx = event.clientX - current.x, dy = event.clientY - current.y;
     if (Math.hypot(dx, dy) < 8 && event.pointerType === 'touch') {
       const now = performance.now();
@@ -543,9 +580,13 @@ function bindReaderGestures() {
       return;
     }
     lastTap = null;
+    classifyDrag(current, dx, dy);
+    if (!current.turn) { surface.scrollTo(current.left - dx, current.top - dy); return; }
     const delta = current.axis === 'x' ? dx : dy, cross = current.axis === 'x' ? dy : dx;
-    if (!current.turn || Math.abs(delta) < 60 || Math.abs(delta) < Math.abs(cross) * 1.2) return;
-    stepReading(-Math.sign(delta));
+    const duration = Math.max(1, event.timeStamp - current.started);
+    const flick = Math.abs(delta) >= 28 && duration <= 250 && Math.abs(delta) / duration >= .5;
+    if (!current.turn || (!flick && Math.abs(delta) < 60) || Math.abs(delta) < Math.abs(cross) * 1.2) return;
+    requestReadingStep(-Math.sign(delta));
   });
   surface.addEventListener('pointercancel', reset);
   surface.addEventListener('lostpointercapture', event => {
@@ -576,22 +617,45 @@ function bindReaderGestures() {
     if (points.size || wheelZoom) return;
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? surface.clientHeight : 1;
     const dx = event.deltaX * unit, dy = event.deltaY * unit;
-    if (!wheel) wheel = {x:0, y:0, left:surface.scrollLeft, top:surface.scrollTop,
-      maxX:surface.scrollWidth - surface.clientWidth, maxY:surface.scrollHeight - surface.clientHeight, turned:false};
+    if (!dx && !dy) return;
+    const now = event.timeStamp;
+    const axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    const amount = Math.abs(axis === 'x' ? dx : dy);
+    const direction = Math.sign(axis === 'x' ? dx : dy);
+    // WheelEvent has no portable gesture phase. Keep decaying momentum latched,
+    // but treat a clear reversal or a fresh impulse after decay as a new input.
+    const reversal = (wheel?.turned || wheel?.panned) && axis === wheel.axis && direction !== wheel.direction && amount >= 24;
+    const impulse = (wheel?.turned || wheel?.panned) && wheel.decayed && axis === wheel.axis && direction === wheel.direction && amount >= Math.max(32, wheel.lastAmount * 3);
+    const resumed = (wheel?.turned || wheel?.panned) && axis === wheel.axis && direction === wheel.direction && now - wheel.lastTime >= 100 && amount >= Math.max(40, wheel.lastAmount * .8);
+    if (!wheel || reversal || impulse || resumed) wheel = {x:0, y:0, samples:0, started:now,
+      left:surface.scrollLeft, top:surface.scrollTop,
+      maxX:surface.scrollWidth - surface.clientWidth, maxY:surface.scrollHeight - surface.clientHeight,
+      turned:false, peak:0, lastAmount:0, decayed:false, panned:false};
     clearTimeout(wheelTimer); wheelTimer = setTimeout(() => { wheel = null; }, 240);
-    wheel.x += dx; wheel.y += dy;
-    if (wheel.turned || state.busy) return;
-    if (!wheel.axis && Math.max(Math.abs(wheel.x), Math.abs(wheel.y)) >= 12) {
+    wheel.samples++; wheel.x += dx; wheel.y += dy;
+    wheel.peak = Math.max(wheel.peak, amount);
+    if ((wheel.turned || wheel.panned) && amount < wheel.peak * .35) wheel.decayed = true;
+    wheel.lastAmount = amount; wheel.lastTime = now;
+    if (wheel.turned) return;
+    if (!wheel.panned && Math.max(Math.abs(wheel.x), Math.abs(wheel.y)) >= 12) {
       wheel.axis = Math.abs(wheel.x) > Math.abs(wheel.y) ? 'x' : 'y';
       const delta = wheel.axis === 'x' ? wheel.x : wheel.y;
       const start = wheel.axis === 'x' ? wheel.left : wheel.top;
       const max = wheel.axis === 'x' ? wheel.maxX : wheel.maxY;
       wheel.turn = max <= 2 || (delta > 0 ? start >= max - 2 : start <= 2);
+      wheel.direction = Math.sign(delta);
     }
-    if (!wheel.turn) { surface.scrollBy(dx, dy); return; }
+    if (!wheel.turn) {
+      surface.scrollBy(dx, dy);
+      if (Math.hypot(surface.scrollLeft - wheel.left, surface.scrollTop - wheel.top) >= 24) wheel.panned = true;
+      return;
+    }
     const delta = wheel.axis === 'x' ? wheel.x : wheel.y, cross = wheel.axis === 'x' ? wheel.y : wheel.x;
-    if (Math.abs(delta) >= 100 && Math.abs(delta) >= Math.abs(cross) * 1.2) {
-      wheel.turned = true; stepReading(Math.sign(delta));
+    const duration = Math.max(1, now - wheel.started);
+    const flick = wheel.samples >= 2 && Math.abs(delta) >= 40 && duration <= 180 && Math.abs(delta) / duration >= .5;
+    if ((Math.abs(delta) >= 100 || flick) && Math.abs(delta) >= Math.abs(cross) * 1.2) {
+      wheel.turned = true; wheel.direction = Math.sign(delta);
+      requestReadingStep(wheel.direction);
     }
   }, {passive:false});
   $('#reader').addEventListener('close', reset);

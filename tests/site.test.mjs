@@ -362,6 +362,93 @@ test('trackpad: horizontal/vertical wheel navigation, inertia latch, scroll prio
   await context.close();
 });
 
+async function gestureFixture(page) {
+  await openReadingFixture(page);await page.locator('#reader-settings-toggle').click();
+  const bounds=await page.locator('#reader-scroll').boundingBox();
+  const x=bounds.x+bounds.width/2,y=bounds.y+350;
+  const drag=async(dx,dy=0)=>{await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+dx,y+dy);await page.mouse.up();};
+  return {x,y,drag};
+}
+const quicklyAt=(page,n)=>page.waitForFunction(n=>document.querySelector('#reader-status').textContent===`第 ${n} 页` && document.querySelector('#reader-scroll').getAttribute('aria-busy')==='false',n,{timeout:1500});
+
+test('fast pointer gestures: release-only movement and short flicks are recognized', async()=>{
+  const context=await browser.newContext({viewport:{width:1000,height:1800}});
+  try{
+    const page=await context.newPage();const {x,y,drag}=await gestureFixture(page);
+    // Simulate a coalesced/lost move: the real release position still moved 120px.
+    await page.locator('#reader-scroll').evaluate(el=>{const stop=event=>{if(event.buttons===1){event.stopImmediatePropagation();el.removeEventListener('pointermove',stop,true);}};el.addEventListener('pointermove',stop,true);});
+    await drag(-120);await quicklyAt(page,2);
+    const timedDrag=async(dx,duration)=>{
+      // Keep the browser's platform clock intact; control only the timestamps
+      // read by the gesture classifier for deterministic fast/slow input.
+      await page.locator('#reader-scroll').evaluate((el,duration)=>{
+        const start=performance.now();
+        el.addEventListener('pointerdown',event=>Object.defineProperty(event,'timeStamp',{value:start}),{capture:true,once:true});
+        el.addEventListener('pointerup',event=>Object.defineProperty(event,'timeStamp',{value:start+duration*1000}),{capture:true,once:true});
+      },duration);
+      await drag(dx);
+    };
+    await timedDrag(-32,.04);await quicklyAt(page,3);
+    await timedDrag(32,.4);await page.waitForTimeout(80);await quicklyAt(page,3);
+    // Small jitter remains a click, not a page turn.
+    await drag(12);await page.waitForTimeout(80);await quicklyAt(page,3);
+  }finally{await context.close();}
+});
+
+test('fast trackpad gestures: short bursts, direction changes and renewed impulses survive inertia', async()=>{
+  const context=await browser.newContext({viewport:{width:1000,height:1800}});
+  try{
+    const page=await context.newPage();const {x,y}=await gestureFixture(page);await page.locator('#reader-scroll').hover();
+    await page.locator('#reader-scroll').evaluate(el=>{
+      const start=performance.now();let samples=0;
+      const stamp=event=>{
+        Object.defineProperty(event,'timeStamp',{value:start+samples++*20});
+        if(samples===2)el.removeEventListener('wheel',stamp,true);
+      };
+      el.addEventListener('wheel',stamp,true);
+    });
+    await page.mouse.wheel(22,0);await page.mouse.wheel(22,0);await quicklyAt(page,2);
+    // A separate strong gesture after a brief pause need not wait out the full 240ms latch.
+    await page.waitForTimeout(110);await page.mouse.wheel(120,0);await quicklyAt(page,3);
+    await page.mouse.wheel(-120,0);await quicklyAt(page,2);
+    await page.locator('#page-input').evaluate(el=>{el.value='1';el.dispatchEvent(new Event('change',{bubbles:true}));});await quicklyAt(page,1);
+    await page.waitForTimeout(270);
+    // A small orthogonal first sample must not permanently lock the wrong axis.
+    await page.mouse.wheel(0,15);await page.mouse.wheel(120,0);await quicklyAt(page,2);
+    for(const delta of [60,20,6,2])await page.mouse.wheel(delta,0);
+    await page.waitForTimeout(50);await quicklyAt(page,2);
+    await page.mouse.wheel(120,0);await quicklyAt(page,3);
+  }finally{await context.close();}
+});
+
+test('queued swipe during page rendering is retained once and cleared on close', async()=>{
+  const context=await browser.newContext({viewport:{width:1000,height:1800}});
+  try{
+    const page=await context.newPage();const {drag}=await gestureFixture(page);
+    await page.evaluate(()=>{
+      const original=requestAnimationFrame.bind(window);
+      window.holdReaderPaint=true;
+      window.requestAnimationFrame=callback=>original(time=>{
+        if(window.holdReaderPaint)window.releaseReaderPaint=()=>{window.holdReaderPaint=false;callback(time);};
+        else callback(time);
+      });
+    });
+    await drag(-120);await page.waitForFunction(()=>typeof window.releaseReaderPaint==='function');
+    assert.equal(await page.locator('#reader-scroll').getAttribute('aria-busy'),'true');
+    await drag(-120);await page.evaluate(()=>window.releaseReaderPaint());await quicklyAt(page,3);
+    assert.equal(new URL(page.url()).searchParams.get('page'),'3');
+    await page.locator('#page-input').evaluate(el=>{el.value='1';el.dispatchEvent(new Event('change',{bubbles:true}));});await quicklyAt(page,1);
+    await page.evaluate(()=>{window.holdReaderPaint=true;delete window.releaseReaderPaint;});
+    await drag(-120);await page.waitForFunction(()=>typeof window.releaseReaderPaint==='function');
+    await drag(-120);await page.locator('#reader-close').click();await page.evaluate(()=>window.releaseReaderPaint());
+    await page.locator('.book-title').first().click();await quicklyAt(page,2);
+    await page.evaluate(()=>{window.holdReaderPaint=true;delete window.releaseReaderPaint;});
+    await page.locator('#reader-scroll').hover();await page.mouse.wheel(120,0);
+    await page.waitForFunction(()=>typeof window.releaseReaderPaint==='function');
+    await page.mouse.wheel(-120,0);await page.evaluate(()=>window.releaseReaderPaint());await quicklyAt(page,2);
+  }finally{await context.close();}
+});
+
 test('PDF download failure clears busy state and allows closing/reopening', async () => {
   const context = await browser.newContext({viewport:{width:390,height:844}});
   const page = await context.newPage();
@@ -490,6 +577,101 @@ test('cached old scripts cannot replace fingerprinted assets in a newly loaded p
     assert.equal(legacyRequests,1,'new HTML never requests the cached compatibility URL');
     assert.equal(await page.evaluate(()=>performance.getEntriesByType('resource').some(entry=>/app\.[a-f0-9]{16}\.js/.test(entry.name))),true);
   }finally{await context.close();await new Promise(resolve=>server.close(resolve));}
+});
+
+test('courses: sidebar category, structured Markdown, static reading and mobile layout', async()=>{
+  const course=books.find(book=>book.course?.id==='mit-htmaa-2026');assert.ok(course);
+  assert.equal(course.category,'07_课程');assert.equal(course.course.weekly_hours,18);
+  assert.deepEqual(course.course.course_codes,['MAS.863','4.140','6.9020']);
+  assert.equal(course.course.cost,null);assert.equal(course.course.certificate,null);
+  const context=await browser.newContext({viewport:{width:1440,height:1000}});
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(staticBase);await page.locator('.category-item[data-category="07_课程"]').click();
+  assert.equal(await page.locator('.book-card').count(),1);
+  assert.match(await page.locator('.course-summary').textContent(),/18 小时/);
+  await page.locator('.book-title').click();await page.waitForURL(`**/read/${course.id}/`);
+  await page.locator('#resource-article').waitFor();
+  assert.match(await page.locator('#resource-article h1').textContent(),/HTMAA 2026/);
+  assert.equal(await page.locator('.library-panel').isVisible(),false);
+  assert.equal(await page.locator('.category-item[data-category="07_课程"]').evaluate(el=>el.classList.contains('active')),true);
+  assert.equal(await page.locator('.course-actions a').filter({hasText:'课程官网'}).getAttribute('href'),course.course.source_url);
+  assert.ok(await page.locator('#resource-article table tbody tr').count()>20);
+  assert.match(await page.locator('#resource-article').textContent(),/80%/);
+  await page.screenshot({path:'artifacts/course-desktop.png'});
+  let axe=await new AxeBuilder({page}).analyze();assert.deepEqual(axe.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)})),[]);
+  for(const width of [390,320]){
+    await page.setViewportSize({width,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    if(width===390)await page.screenshot({path:'artifacts/course-mobile.png'});
+  }
+  await page.setViewportSize({width:1440,height:1000});
+  await page.locator('.category-item[data-category="07_课程"]').click();
+  assert.equal(new URL(page.url()).pathname,'/');assert.equal(await page.locator('#resource-article').isVisible(),false);
+  assert.equal(await page.locator('.book-card').count(),1);
+  await page.goBack();await page.locator('#resource-article').waitFor({state:'visible'});
+  assert.deepEqual(errors,[]);await context.close();
+  const withoutJS=await browser.newContext({javaScriptEnabled:false});const staticPage=await withoutJS.newPage();
+  await staticPage.goto(`${staticBase}/read/${course.id}/`);assert.equal(await staticPage.locator('#resource-article').isVisible(),true);
+  await withoutJS.close();
+});
+
+async function runProgram(command,args,options={}){
+  const child=spawn(command,args,{...options,stdio:['pipe','pipe','pipe']});let stdout='',stderr='';
+  child.stdout.on('data',chunk=>stdout+=chunk);child.stderr.on('data',chunk=>stderr+=chunk);
+  child.stdin.end(options.input||'');const code=await new Promise(resolve=>child.on('exit',resolve));return {code,stdout,stderr};
+}
+
+test('Markdown rendering escapes raw HTML and refuses script URLs', async()=>{
+  const input=JSON.stringify(['# Demo\n\n<script>window.courseInjected=true</script>\n\n[bad](javascript:alert(1))\n\n[good](https://example.org/)']);
+  const result=await runProgram('node',['scripts/render_markdown.mjs'],{input});assert.equal(result.code,0,result.stderr);
+  const [html]=JSON.parse(result.stdout);
+  const page=await (await browser.newContext()).newPage();await page.setContent(html);
+  assert.equal(await page.locator('script').count(),0);assert.equal(await page.locator('a[href^="javascript:"]').count(),0);
+  assert.equal(await page.locator('a[href="https://example.org/"]').count(),1);
+  assert.equal(await page.evaluate(()=>window.courseInjected),undefined);await page.context().close();
+});
+
+test('repository skill install is idempotent, preserves unrelated skills and rejects collisions', async()=>{
+  const root=join(temporary,'skill-install');await mkdir(join(root,'skills/import-course'),{recursive:true});
+  await import('node:fs/promises').then(fs=>fs.cp('skills/import-course',join(root,'skills/import-course'),{recursive:true}));
+  const unrelated=join(root,'.codex/skills/unrelated');await mkdir(unrelated,{recursive:true});await import('node:fs/promises').then(fs=>fs.writeFile(join(unrelated,'SKILL.md'),'user-owned'));
+  for(let i=0;i<2;i++){
+    const result=await runProgram('python3',['scripts/install_skills.py','--root',root]);assert.equal(result.code,0,result.stderr);
+  }
+  assert.equal(await readFile(join(unrelated,'SKILL.md'),'utf8'),'user-owned');
+  assert.equal(await readFile(join(root,'.codex/skills/import-course/SKILL.md'),'utf8'),await readFile('skills/import-course/SKILL.md','utf8'));
+  const fs=await import('node:fs/promises');await fs.rm(join(root,'.codex/skills/import-course/.installed-by.json'));
+  const collision=await runProgram('python3',['scripts/install_skills.py','--root',root]);assert.notEqual(collision.code,0);
+  assert.equal(await readFile(join(root,'.codex/skills/import-course/SKILL.md'),'utf8'),await readFile('skills/import-course/SKILL.md','utf8'));
+});
+
+test('course skill creation validates, deduplicates and preserves learning notes on update', async()=>{
+  const fs=await import('node:fs/promises');const root=join(temporary,'course-skill');
+  await mkdir(join(root,'books/book-manager'),{recursive:true});await mkdir(join(root,'scripts'),{recursive:true});
+  await fs.copyFile('books/book-manager/server.py',join(root,'books/book-manager/server.py'));await fs.writeFile(join(root,'scripts/build.py'),'# fixture');
+  const course=books.find(book=>book.course),metadata={...course.course,id:'test-course'};
+  const raw=await readFile(join('books',course.path),'utf8');const body=raw.replace(/^---\n[\s\S]*?\n---\n/,'').replace(/## 学习记录[\s\S]*/,'').trim();
+  const spec=join(root,'spec.json'),content=join(root,'body.md');await fs.writeFile(spec,JSON.stringify(metadata));await fs.writeFile(content,body+'\n\n## 学习记录\n用户保留的笔记。\n');
+  const runner=join(process.cwd(),'skills/import-course/scripts/course.py');
+  const args=[runner,'create','--spec',spec,'--body',content,'--topic','数字制造'];
+  let result=await runProgram('python3',args,{cwd:root});assert.equal(result.code,0,result.stderr);
+  const destination=join(root,'books/07_课程/数字制造/test-course.md');await fs.writeFile(content,body+'\n');
+  result=await runProgram('python3',[...args,'--update'],{cwd:root});assert.equal(result.code,0,result.stderr);
+  assert.match(await readFile(destination,'utf8'),/用户保留的笔记/);
+  await fs.writeFile(content,body+'\n\n## 学习记录\n自动生成的占位内容。\n');
+  result=await runProgram('python3',[...args,'--update'],{cwd:root});assert.equal(result.code,0,result.stderr);
+  assert.match(await readFile(destination,'utf8'),/用户保留的笔记/);
+  assert.doesNotMatch(await readFile(destination,'utf8'),/自动生成的占位内容/);
+  const before=await readFile(destination,'utf8');
+  await fs.writeFile(spec,JSON.stringify({...metadata,id:'another-id'}));
+  result=await runProgram('python3',args,{cwd:root});assert.notEqual(result.code,0);assert.match(result.stderr,/already exists/);
+  assert.equal(await readFile(destination,'utf8'),before);
+  await fs.writeFile(spec,JSON.stringify({...metadata,provider:undefined}));
+  result=await runProgram('python3',args,{cwd:root});assert.notEqual(result.code,0);
+  assert.equal(await readFile(destination,'utf8'),before);
+  await fs.writeFile(spec,JSON.stringify({...metadata,id:'test-course-2027',year:2027,term:'2027 秋季',provider:null}));
+  result=await runProgram('python3',args,{cwd:root});assert.equal(result.code,0,result.stderr);
+  assert.equal(await readFile(destination,'utf8'),before);
 });
 
 test('local review: all file formats, UI marking and reset, persistence, fingerprints, original bytes untouched', async () => {
